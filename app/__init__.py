@@ -12,8 +12,13 @@ def create_app(config_name='dev'):
     db.init_app(app)
     migrate.init_app(app, db)
 
-    # We will register our blueprints (routes) here later
-    
+    #import models here
+    from app.models.user import User
+    from app.models.product import Product
+    from app.models.order import Order, OrderItem
+
+    # our blueprints
+
     # A simple health check route to verify the app is running
     @app.route('/api/health')
     def health_check():
