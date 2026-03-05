@@ -31,7 +31,7 @@ def place_order():
     except Exception as e:
         return jsonify({'message': 'An error occurred while placing the order.'}), 500
     
-    
+
 @orders_bp.route('', methods=['GET'])
 @jwt_required
 def get_orders():
@@ -76,3 +76,5 @@ def cancel_order(order_id):
         return jsonify({'message': str(ve)}), 400
     except Exception as e:
         return jsonify({'message': 'An error occurred while cancelling the order.'}), 500
+    
+    
