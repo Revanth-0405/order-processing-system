@@ -4,8 +4,9 @@
 
 # Python environment
 venv/
-env/
+
 .env
+
 !.env.example
 
 # Byte-compiled / optimized / DLL files
