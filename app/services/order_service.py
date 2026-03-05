@@ -62,3 +62,28 @@ class OrderService:
         except Exception as e:
             db.session.rollback() # Roll back everything if any step fails
             raise e
+    
+    @staticmethod
+    def get_user_orders(user_id, page=1, per_page=10, status=None):
+        query = Order.query.filter_by(user_id=user_id)
+        
+        if status:
+            query = query.filter_by(status=status)
+            
+        return query.order_by(Order.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+
+    @staticmethod
+    def get_order_by_id(order_id, user_id):
+        # Ensures a user can only fetch their own orders
+        return Order.query.filter_by(id=order_id, user_id=user_id).first()
+
+    @staticmethod
+    def cancel_order(order):
+        # Rule: cancel only if status is pending or confirmed
+        if order.status not in ['pending', 'confirmed']:
+            raise ValueError(f"Cannot cancel order with status: {order.status}")
+            
+        order.status = 'cancelled'
+        # we will trigger the update_inventory Lambda here to restore stock
+        db.session.commit()
+        return order
