@@ -1,6 +1,8 @@
+import logging
 from flask import Flask
 from app.config import config_by_name
 from app.extensions import db, migrate
+from app.utils.error_handlers import register_error_handlers
 
 def create_app(config_name='dev'):
     app = Flask(__name__)
@@ -8,9 +10,15 @@ def create_app(config_name='dev'):
     # Load config
     app.config.from_object(config_by_name[config_name])
 
+    #configure logging
+    logging.basicConfig(level=logging.INFO)
+
     # Initialize extensions with the app
     db.init_app(app)
     migrate.init_app(app, db)
+
+    # Register error handlers
+    register_error_handlers(app)
 
     #import models here
     from app.models.user import User
