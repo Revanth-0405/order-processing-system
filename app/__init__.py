@@ -18,6 +18,9 @@ def create_app(config_name='dev'):
     from app.models.order import Order, OrderItem
 
     # our blueprints
+    from app.routes.products import products_bp
+
+    app.register_blueprint(products_bp, url_prefix='/api/products')
 
     # A simple health check route to verify the app is running
     @app.route('/api/health')
