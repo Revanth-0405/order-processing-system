@@ -50,8 +50,16 @@ class DynamoDBService:
         return response.get('Items', [])
     
     @staticmethod
-    def get_all_events():
+    def get_all_events(limit=10, exclusive_start_key=None):
         table = DynamoDBService.get_table()
+        scan_kwargs = {'Limit': limit}
         
-        response = table.scan()
-        return response.get('Items', [])
+        if exclusive_start_key:
+            scan_kwargs['ExclusiveStartKey'] = exclusive_start_key
+            
+        response = table.scan(**scan_kwargs)
+        
+        return {
+            'items': response.get('Items', []),
+            'last_evaluated_key': response.get('LastEvaluatedKey')
+        }
