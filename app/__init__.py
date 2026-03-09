@@ -20,10 +20,14 @@ def create_app(config_name='dev'):
     # Register error handlers
     register_error_handlers(app)
 
+    from lambdas.shared.dynamo_utils import create_order_events_table
+    create_order_events_table()
+
     #import models here
     from app.models.user import User
     from app.models.product import Product
     from app.models.order import Order, OrderItem
+    
 
     # our blueprints
     from app.routes.products import products_bp
