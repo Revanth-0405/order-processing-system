@@ -48,3 +48,10 @@ class DynamoDBService:
             KeyConditionExpression=Key('event_type').eq(event_type)
         )
         return response.get('Items', [])
+    
+    @staticmethod
+    def get_all_events():
+        table = DynamoDBService.get_table()
+        
+        response = table.scan()
+        return response.get('Items', [])

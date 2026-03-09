@@ -3,7 +3,9 @@ from marshmallow import ValidationError
 from app.services.order_service import OrderService
 from app.schemas.order import order_input_schema, order_output_schema
 from app.utils.decorators import jwt_required
-
+from app.services.dynamodb_service import DynamoDBService
+from app.utils.decorators import admin_required
+from app.services.lambda_invoker import LambdaInvoker
 
 orders_bp = Blueprint('orders', __name__, url_prefix='/api/orders')
 
@@ -77,4 +79,33 @@ def cancel_order(order_id):
     except Exception as e:
         return jsonify({'message': 'An error occurred while cancelling the order.'}), 500
     
+@orders_bp.route('/<uuid:order_id>/events', methods=['GET'])
+@jwt_required
+def get_order_events(order_id):
+    # Verify the user owns this order first (or is admin)
+    user_id = request.user['id']
+    order = OrderService.get_order_by_id(order_id, user_id)
+    if not order and not request.user.get('is_admin'):
+        return jsonify({'message': 'Order not found or access denied'}), 404
+
+    events = DynamoDBService.get_events_by_order(order_id)
+    return jsonify({'items': events, 'total': len(events)}), 200
+
+@orders_bp.route('/<uuid:order_id>/process', methods=['POST'])
+@admin_required
+def manually_process_order(order_id):
+    order = Order.query.get(order_id)
+    if not order:
+        return jsonify({'message': 'Order not found'}), 404
+
+    payload = {
+        "order_id": str(order.id),
+        "action": "manual_process_trigger",
+        "user_id": str(order.user_id)
+    }
     
+    try:
+        result = LambdaInvoker.invoke('process_order', payload)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({'message': f"Failed to invoke lambda: {str(e)}"}), 500
