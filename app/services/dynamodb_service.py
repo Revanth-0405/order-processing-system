@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Key
-from shared.dynamo_utils import get_dynamodb_resource
+from lambdas.shared.dynamo_utils import get_dynamodb_resource
 
 class DynamoDBService:
     @staticmethod
