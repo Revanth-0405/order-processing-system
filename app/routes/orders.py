@@ -1,13 +1,14 @@
 from flask import Blueprint, request, jsonify
 from marshmallow import ValidationError
+from flask_jwt_extended import get_jwt_identity
 from app.services.order_service import OrderService
-from app.schemas.order import order_input_schema, order_output_schema
+from app.schemas.order import order_input_schema, order_output_schema, orders_output_schema
 from app.utils.decorators import jwt_required
 from app.services.dynamodb_service import DynamoDBService
 from app.utils.decorators import admin_required
 from app.services.lambda_invoker import LambdaInvoker
 
-orders_bp = Blueprint('orders', __name__, url_prefix='/api/orders')
+orders_bp = Blueprint('orders', __name__)
 
 @orders_bp.route('', methods=['POST'])
 @jwt_required
@@ -20,8 +21,8 @@ def place_order():
     except ValidationError as err:
         return jsonify(err.messages), 400
         
-    # 2. Extract user ID (mocked via decorator for now)
-    user_id = request.user['id'] 
+    # 2. Extract user ID from JWT
+    user_id = get_jwt_identity()
     
     # 3. Process the order
     try:
@@ -37,7 +38,7 @@ def place_order():
 @orders_bp.route('', methods=['GET'])
 @jwt_required
 def get_orders():
-    user_id = request.user['id']
+    user_id = get_jwt_identity()
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     status = request.args.get('status') # Optional filter
@@ -54,7 +55,7 @@ def get_orders():
 @orders_bp.route('/<uuid:order_id>', methods=['GET'])
 @jwt_required
 def get_order(order_id):
-    user_id = request.user['id']
+    user_id = get_jwt_identity()
     order = OrderService.get_order_by_id(order_id, user_id)
     
     if not order:
@@ -65,7 +66,7 @@ def get_order(order_id):
 @orders_bp.route('/<uuid:order_id>/cancel', methods=['PUT'])
 @jwt_required
 def cancel_order(order_id):
-    user_id = request.user['id']
+    user_id = get_jwt_identity()
     order = OrderService.get_order_by_id(order_id, user_id)
     
     if not order:

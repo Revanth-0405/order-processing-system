@@ -1,27 +1,27 @@
 from functools import wraps
-from flask import request, jsonify
+from flask import jsonify
+from flask_jwt_extended import verify_jwt_in_request, get_jwt
 
 def jwt_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Placeholder: Implement your Level 1 JWT extraction here later
-        token = request.headers.get('Authorization')
-        if not token:
-            return jsonify({'message': 'Token is missing!'}), 401
-        
-        # Mocking user context for now
-        request.user = {'id': 'mock-uuid', 'is_admin': False}
+        # verify_jwt_in_request() automatically checks the Authorization header
+        # for a valid Bearer token. If missing or invalid, it returns a 401/422.
+        verify_jwt_in_request()
         return f(*args, **kwargs)
     return decorated_function
 
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Placeholder: Verify admin status based on the JWT token
-        # For testing Phase 1 quickly, we'll bypass the strict check
-        # In production, check if request.user['is_admin'] is True
-        token = request.headers.get('Authorization')
-        if token != "Bearer admin-token": # Simple mock check for testing
+        # First, ensure they are logged in
+        verify_jwt_in_request()
+        
+        # Second, grab the additional claims we attached during login
+        claims = get_jwt()
+        
+        # Check if the 'is_admin' claim is True
+        if not claims.get('is_admin', False):
             return jsonify({'message': 'Admin privileges required!'}), 403
             
         return f(*args, **kwargs)
