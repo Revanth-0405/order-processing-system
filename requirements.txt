@@ -4,5 +4,9 @@ Flask-Migrate==4.0.5
 psycopg2-binary==2.9.9
 python-dotenv==1.0.0
 marshmallow==3.20.1
+<<<<<<< HEAD
+boto3
+=======
 Flask-JWT-Extended==4.6.0
 Werkzeug==3.0.1
+>>>>>>> bba1f925e3d7c70b662c874826a88f9012ae24af

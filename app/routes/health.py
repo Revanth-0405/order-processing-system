@@ -1,6 +1,5 @@
 from flask import Blueprint, jsonify
 from app.extensions import db
-from shared.dynamo_utils import get_dynamodb_resource
 from sqlalchemy import text
 
 health_bp = Blueprint('health', __name__)
@@ -17,12 +16,20 @@ def health_check():
         status["postgres"] = "disconnected"
         status["status"] = "unhealthy"
 
-    # Check DynamoDB
+    # Check DynamoDB (Deferred import to avoid path issues on startup)
     try:
+        try:
+            # If your folder is in the root directory
+            from lambdas.shared.dynamo_utils import get_dynamodb_resource
+        except ModuleNotFoundError:
+            # If your folder is inside the lambdas/ directory
+            from lambdas.shared.dynamo_utils import get_dynamodb_resource
+            
         dynamodb = get_dynamodb_resource()
         dynamodb.meta.client.list_tables(Limit=1)
         status["dynamodb"] = "connected"
-    except Exception:
+    except Exception as e:
+        print(f"DynamoDB Health Check Error: {e}")
         status["dynamodb"] = "disconnected"
         status["status"] = "unhealthy"
 
