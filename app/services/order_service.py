@@ -4,6 +4,7 @@ import string
 from app.extensions import db
 from app.models.order import Order, OrderItem
 from app.models.product import Product
+from app.services.lambda_invoker import LambdaInvoker
 
 class OrderService:
     @staticmethod
@@ -56,7 +57,30 @@ class OrderService:
                 db.session.add(order_item)
 
             new_order.total_amount = total_amount
-            db.session.commit()
+            db.session.commit() # Atomic commit for Order + OrderItems
+            
+            try:
+                # 1. Invoke process_order Lambda
+                process_payload = {
+                    "order_id": str(new_order.id),
+                    "action": "order_created",
+                    "user_id": str(user_id)
+                }
+                process_result = LambdaInvoker.invoke('process_order', process_payload)
+
+                # 2. If processing succeeds, chain the inventory update
+                if process_result and process_result.get('status') == 'success':
+                    inventory_payload = {
+                        "order_id": str(new_order.id),
+                        "action": "reduce_stock"
+                    }
+                    LambdaInvoker.invoke('update_inventory', inventory_payload)
+                    
+                    # Note: We will add the send_webhook invocation here in Phase 3
+            except Exception as e:
+                # In a real system, we'd use a Dead Letter Queue (DLQ) for failed invocations
+                print(f"Failed to invoke async lambdas: {e}")
+
             return new_order
         except Exception as e:
             db.session.rollback()
@@ -85,4 +109,14 @@ class OrderService:
                 product.stock_quantity += item.quantity
 
         db.session.commit()
+        
+        try:
+            inventory_payload = {
+                "order_id": str(order.id),
+                "action": "restore_stock"
+            }
+            LambdaInvoker.invoke('update_inventory', inventory_payload)
+        except Exception as e:
+            print(f"Failed to invoke update_inventory lambda: {e}")
+
         return order
