@@ -8,8 +8,7 @@ class Order(db.Model):
     id = db.Column(db.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     order_number = db.Column(db.String(50), unique=True, nullable=False) # e.g., ORD-YYYYMMDD-XXXX
     user_id = db.Column(db.Uuid(as_uuid=True), db.ForeignKey('users.id'), nullable=False)
-    status = db.Column(db.Enum('pending','confirmed','processing','shipped','delivered','cancelled', name='order_status_enum'), default='pending', nullable=False)
-    total_amount = db.Column(db.Numeric(10, 2), nullable=False, default=0.00)
+    status = db.Column(db.Enum('pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', name='order_status_enum'), default='pending', nullable=False)
     shipping_address = db.Column(db.Text, nullable=False)
     notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
