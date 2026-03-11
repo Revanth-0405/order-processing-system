@@ -2,6 +2,8 @@ import uuid
 from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Key
 from lambdas.shared.dynamo_utils import get_dynamodb_resource
+from app.services.lambda_invoker import LambdaInvoker
+import logging
 
 class DynamoDBService:
     @staticmethod
@@ -26,8 +28,26 @@ class DynamoDBService:
             'created_at': timestamp
         }
         
-        table.put_item(Item=item)
-        return item
+        try:
+            table.put_item(Item=item)
+            
+            # Automatically trigger the webhook Lambda for every new event
+            webhook_payload = {
+                "order_id": str(order_id),
+                "event_type": event_type,
+                "payload": payload or {}
+            }
+            try:
+                # In a real AWS environment, DynamoDB Streams handles this asynchronously.
+                LambdaInvoker.invoke('send_webhook', webhook_payload)
+            except Exception as e:
+                logging.getLogger(__name__).error(f"Failed to trigger webhook lambda: {e}")
+        
+            return item
+        except ClientError as e:
+            print(f"Error saving event to DynamoDB: {e.response['Error']['Message']}")
+            return None
+
 
     @staticmethod
     def get_events_by_order(order_id):
