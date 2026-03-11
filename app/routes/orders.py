@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from marshmallow import ValidationError
-from flask_jwt_extended import get_jwt_identity
+from flask_jwt_extended import get_jwt_identity, get_jwt
+from app.models.order import Order
 from app.services.order_service import OrderService
 from app.schemas.order import order_input_schema, order_output_schema, orders_output_schema
 from app.utils.decorators import jwt_required
@@ -52,16 +53,19 @@ def get_orders():
         'current_page': pagination.page
     }), 200
 
-@orders_bp.route('/<uuid:order_id>', methods=['GET'])
+@orders_bp.route('/<uuid:order_id>/events', methods=['GET'])
 @jwt_required
-def get_order(order_id):
+def get_order_events(order_id):
     user_id = get_jwt_identity()
+    claims = get_jwt()
+    is_admin = claims.get('is_admin', False)
+
     order = OrderService.get_order_by_id(order_id, user_id)
-    
-    if not order:
-        return jsonify({'message': 'Order not found'}), 404
-        
-    return jsonify(order_output_schema.dump(order)), 200
+    if not order and not is_admin:
+        return jsonify({'message': 'Order not found or access denied'}), 404
+
+    events = DynamoDBService.get_events_by_order(order_id)
+    return jsonify({'items': events, 'total': len(events)}), 200
 
 @orders_bp.route('/<uuid:order_id>/cancel', methods=['PUT'])
 @jwt_required
