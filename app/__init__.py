@@ -36,11 +36,13 @@ def create_app(config_name='dev'):
     from app.routes.auth import auth_bp
     from app.routes.health import health_bp
     from app.routes.events import events_bp
+    from app.routes.webhooks import webhooks_bp
 
     app.register_blueprint(products_bp, url_prefix='/api/products')
     app.register_blueprint(orders_bp, url_prefix='/api/orders')
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(health_bp, url_prefix='/api/health')
     app.register_blueprint(events_bp, url_prefix='/api/events')
+    app.register_blueprint(webhooks_bp, url_prefix='/api/webhooks')
 
     return app
