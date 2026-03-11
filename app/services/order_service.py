@@ -40,9 +40,6 @@ class OrderService:
                 if product.stock_quantity < item_data['quantity']:
                     raise ValueError(f"Insufficient stock for product: {product.name}")
 
-                # DEDUCT STOCK
-                product.stock_quantity -= item_data['quantity']
-
                 unit_price = product.price
                 subtotal = unit_price * item_data['quantity']
                 total_amount += subtotal
@@ -96,17 +93,16 @@ class OrderService:
         return query.order_by(Order.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
 
     @staticmethod
+    def get_order_by_id(order_id, user_id):
+        # Ensures a user can only fetch their own orders
+        return Order.query.filter_by(id=order_id, user_id=user_id).first()
+
+    @staticmethod
     def cancel_order(order):
         if order.status not in ['pending', 'confirmed']:
             raise ValueError(f"Cannot cancel order with status: {order.status}")
             
         order.status = 'cancelled'
-        
-        # RESTORE STOCK
-        for item in order.items:
-            product = Product.query.get(item.product_id)
-            if product:
-                product.stock_quantity += item.quantity
 
         db.session.commit()
         
