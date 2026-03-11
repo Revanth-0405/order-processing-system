@@ -6,6 +6,7 @@ Create Date: 2026-03-05 11:28:53.650298
 
 """
 from alembic import op
+from sqlalchemy.dialects import postgresql
 import sqlalchemy as sa
 
 
@@ -48,7 +49,7 @@ def upgrade():
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('order_number', sa.String(length=50), nullable=False),
     sa.Column('user_id', sa.Uuid(), nullable=False),
-    sa.Column('status', sa.String(length=20), nullable=True),
+    sa.Column('status', postgresql.ENUM('pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', name='order_status_enum', create_type=False), server_default='pending', nullable=False),
     sa.Column('total_amount', sa.Numeric(precision=10, scale=2), nullable=False),
     sa.Column('shipping_address', sa.Text(), nullable=False),
     sa.Column('notes', sa.Text(), nullable=True),
