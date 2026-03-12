@@ -2,6 +2,8 @@ import uuid
 from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Key
 from lambdas.shared.dynamo_utils import get_dynamodb_resource
+from app.services.lambda_invoker import LambdaInvoker
+import logging
 
 class DynamoDBService:
     @staticmethod
@@ -26,8 +28,26 @@ class DynamoDBService:
             'created_at': timestamp
         }
         
-        table.put_item(Item=item)
-        return item
+        try:
+            table.put_item(Item=item)
+            
+            # Automatically trigger the webhook Lambda for every new event
+            webhook_payload = {
+                "order_id": str(order_id),
+                "event_type": event_type,
+                "payload": payload or {}
+            }
+            try:
+                # In a real AWS environment, DynamoDB Streams handles this asynchronously.
+                LambdaInvoker.invoke('send_webhook', webhook_payload)
+            except Exception as e:
+                logging.getLogger(__name__).error(f"Failed to trigger webhook lambda: {e}")
+        
+            return item
+        except ClientError as e:
+            print(f"Error saving event to DynamoDB: {e.response['Error']['Message']}")
+            return None
+
 
     @staticmethod
     def get_events_by_order(order_id):
@@ -63,3 +83,55 @@ class DynamoDBService:
             'items': response.get('Items', []),
             'last_evaluated_key': response.get('LastEvaluatedKey')
         }
+    
+    @staticmethod
+    def create_webhook_deliveries_table():
+        dynamodb = get_dynamodb_resource()
+        try:
+            table = dynamodb.create_table(
+                TableName='WebhookDeliveries',
+                KeySchema=[
+                    {'AttributeName': 'delivery_id', 'KeyType': 'HASH'},
+                    {'AttributeName': 'timestamp', 'KeyType': 'RANGE'}
+                ],
+                AttributeDefinitions=[
+                    {'AttributeName': 'delivery_id', 'AttributeType': 'S'},
+                    {'AttributeName': 'timestamp', 'AttributeType': 'S'},
+                    {'AttributeName': 'webhook_id', 'AttributeType': 'S'}
+                ],
+                GlobalSecondaryIndexes=[
+                    {
+                        'IndexName': 'WebhookIdIndex',
+                        'KeySchema': [
+                            {'AttributeName': 'webhook_id', 'KeyType': 'HASH'},
+                            {'AttributeName': 'timestamp', 'KeyType': 'RANGE'}
+                        ],
+                        'Projection': {'ProjectionType': 'ALL'},
+                        'ProvisionedThroughput': {'ReadCapacityUnits': 5, 'WriteCapacityUnits': 5}
+                    }
+                ],
+                ProvisionedThroughput={'ReadCapacityUnits': 5, 'WriteCapacityUnits': 5}
+            )
+            table.wait_until_exists()
+            print("Successfully created DynamoDB table: WebhookDeliveries")
+        except ClientError as e:
+            if e.response['Error']['Code'] != 'ResourceInUseException':
+                print(f"Error creating WebhookDeliveries table: {e}")
+
+    @staticmethod
+    def log_delivery(webhook_id, url, event_type, payload, status_code, success, attempts, error=None):
+        table = get_dynamodb_resource().Table('WebhookDeliveries')
+        item = {
+            'delivery_id': str(uuid.uuid4()),
+            'webhook_id': str(webhook_id),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'target_url': url,
+            'event_type': event_type,
+            'payload': payload,
+            'status_code': status_code,
+            'success': success,
+            'attempts': attempts,
+            'error': error
+        }
+        table.put_item(Item=item)
+        return item

@@ -22,3 +22,4 @@ class User(db.Model):
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     orders = db.relationship('Order', backref='user', lazy=True)
+    webhooks = db.relationship('WebhookSubscription', backref='user', lazy=True, cascade="all, delete-orphan")
