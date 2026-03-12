@@ -84,20 +84,6 @@ def cancel_order(order_id):
     except Exception as e:
         return jsonify({'message': 'An error occurred while cancelling the order.'}), 500
     
-@orders_bp.route('/<uuid:order_id>/events', methods=['GET'])
-@jwt_required
-def get_order_events(order_id):
-    # Verify the user owns this order first (or is admin)
-    user_id = get_jwt_identity()
-    claims = get_jwt()
-    is_admin = claims.get('is_admin', False)
-
-    order = OrderService.get_order_by_id(order_id, user_id)
-    if not order and not request.user.get('is_admin'):
-        return jsonify({'message': 'Order not found or access denied'}), 404
-
-    events = DynamoDBService.get_events_by_order(order_id)
-    return jsonify({'items': events, 'total': len(events)}), 200
 
 @orders_bp.route('/<uuid:order_id>/process', methods=['POST'])
 @admin_required
