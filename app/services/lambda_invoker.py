@@ -3,6 +3,7 @@ import json
 import boto3
 import logging
 from importlib import import_module
+from flask import g, has_request_context
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,11 @@ class LambdaInvoker:
         """
         Invokes a Lambda function based on LAMBDA_MODE (local or aws).
         """
+
+        # Inject Request ID for tracing
+        if has_request_context() and hasattr(g, 'request_id'):
+            payload['request_id'] = g.request_id
+            
         mode = os.environ.get('LAMBDA_MODE', 'local')
 
         if mode == 'local':
