@@ -4,7 +4,7 @@ import hashlib
 import json
 import time
 from app.utils.logger import setup_logger
-from app.models.webhook import WebhookSubscription
+from app.models.webhook import WebhookSubscription, WebhookDLQ
 from app.models.order import Order
 from app.services.dynamodb_service import DynamoDBService
 from app.extensions import db
@@ -62,6 +62,14 @@ def handler(event, context):
         else:
             sub.failure_count += 1 # Increment on total failure
             logger.warning(f"Webhook {sub.id} failed {sub.failure_count} consecutive times.", extra={'request_id': request_id})
+            
+            dlq_item = WebhookDLQ(
+                webhook_id=sub.id,
+                payload=payload_bytes.decode('utf-8'),
+                error_message=error_msg
+            )
+            db.session.add(dlq_item)
+            logger.info(f"Payload routed to Dead Letter Queue for webhook {sub.id}", extra={'request_id': request_id})
             
             if sub.failure_count >= 5:
                 sub.is_active = False

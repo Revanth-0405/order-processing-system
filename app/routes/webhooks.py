@@ -4,7 +4,7 @@ from flask import Blueprint, request, jsonify
 from marshmallow import ValidationError
 from flask_jwt_extended import get_jwt_identity
 from app.extensions import db
-from app.models.webhook import WebhookSubscription
+from app.models.webhook import WebhookSubscription, WebhookDLQ
 from app.schemas.webhook import webhook_schema, webhooks_schema
 from app.utils.decorators import jwt_required
 from app.services.dynamodb_service import DynamoDBService
@@ -127,3 +127,33 @@ def listen():
 
     print(f" WEBHOOK RECEIVED & VERIFIED: {request.json.get('event')}")
     return jsonify({'message': 'Webhook received successfully'}), 200
+
+#DLQ ENDPOINTS
+@webhooks_bp.route('/dlq', methods=['GET'])
+@jwt_required
+def get_dlq():
+    # Fetch unresolved DLQ items for the current user's webhooks
+    user_id = get_jwt_identity()
+    dlq_items = db.session.query(WebhookDLQ).join(WebhookSubscription).filter(
+        WebhookSubscription.user_id == user_id,
+        WebhookDLQ.resolved == False
+    ).all()
+    
+    result = []
+    for item in dlq_items:
+        result.append({
+            "dlq_id": str(item.id),
+            "webhook_id": str(item.webhook_id),
+            "error": item.error_message,
+            "payload": item.payload,
+            "created_at": item.created_at.isoformat()
+        })
+    return jsonify({"dlq_items": result}), 200
+
+@webhooks_bp.route('/dlq/<uuid:dlq_id>/resolve', methods=['POST'])
+@jwt_required
+def resolve_dlq(dlq_id):
+    dlq_item = WebhookDLQ.query.get_or_404(dlq_id)
+    dlq_item.resolved = True
+    db.session.commit()
+    return jsonify({"message": "DLQ item marked as resolved"}), 200

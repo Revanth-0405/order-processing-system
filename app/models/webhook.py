@@ -21,3 +21,17 @@ class WebhookSubscription(db.Model):
     __table_args__ = (
         db.UniqueConstraint('user_id', 'target_url', 'event_type', name='uq_user_url_event'),
     )
+
+class WebhookDLQ(db.Model):
+    __tablename__ = 'webhook_dlq'
+
+    id = db.Column(db.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    webhook_id = db.Column(db.Uuid(as_uuid=True), db.ForeignKey('webhook_subscriptions.id'), nullable=False)
+    
+    # Store the exact JSON payload that failed so it can be reviewed or re-sent
+    payload = db.Column(db.Text, nullable=False) 
+    error_message = db.Column(db.String(255))
+    
+    # Manual review flag
+    resolved = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
