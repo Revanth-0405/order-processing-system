@@ -1,105 +1,172 @@
 # Serverless Event-Driven Order Processing System
 
-An **enterprise-grade, event-driven order processing API** built with **Flask, PostgreSQL, DynamoDB, and AWS Lambda**. This system handles asynchronous order processing, inventory management, and includes a robust, secure **webhook dispatch system** for notifying external merchants.
+## Overview
+
+An **enterprise-grade, event-driven e-commerce backend** built with **Flask, PostgreSQL, DynamoDB, and simulated AWS Lambda functions**.
+
+This system provides:
+
+* Secure **JWT authentication**
+* **Product inventory management** with PostgreSQL row-level locking
+* **Immutable event logging** in DynamoDB
+* **Enterprise-grade webhook delivery system** with **HMAC-SHA256 signing**
+* **Exponential backoff retries** and delivery observability
 
 ---
 
-# 🏗 Architecture Diagram
+# Architecture Diagram
 
 ```text
-+-------------------+        +--------------------+      +-----------------------+
-|    Flask API      | -----> |    PostgreSQL      |      |      DynamoDB         |
-|    (Gateway)      |        |   (Orders, Users,  |      |   (Event Logs,        |
-|  (Auth, Routes)   |        |     Products)      |      |   Webhook Delivery)   |
-+-------------------+        +--------------------+      +-----------------------+
-         |                                                           ^
-         | (Invokes asynchronously)                                  | (Logs delivery)
-         v                                                           |
-+-------------------+    Trigger   +--------------------+            |
-|   AWS Lambda      | -----------> |   AWS Lambda       | -----------+
-| (process_order)   |              | (send_webhook)     |
-+-------------------+              +--------------------+
-         |
-         | Trigger
-         v
-+-------------------+
-|   AWS Lambda      |
-| (update_inventory)|
-+-------------------+
+[ Client ] ---> [ Flask REST API ] ---> [ PostgreSQL ] (State: Users, Orders, Products, Webhooks)
+                        |
+                        v
+               (Lambda Invoker)
+                        |
+            +-----------+-----------+
+            |                       |
+    [ process_order ]      [ update_inventory ] (Row-Level Locking)
+            |                       |
+            +-----------+-----------+
+                        |
+                        v
+               [ DynamoDB Local ] (OrderEvents Table)
+                        |
+                 (DynamoDB Stream Simulation)
+                        |
+                        v
+                [ send_webhook ] (HMAC-SHA256 Signing & Retries)
+                        |
+            +-----------+-----------+
+            |                       |
+            v                       v
+    [ External URLs ]      [ DynamoDB Local ] (WebhookDeliveries Table)
 ```
 
 ---
 
-# 🚀 Tech Stack
+# Tech Stack
 
-**Framework**
+### Web Framework
 
-* Python 3.12
-* Flask (App Factory Pattern, Blueprints)
+* Flask
+* Flask-RESTful
 
-**Databases**
+### Relational Database
 
-* PostgreSQL (Relational Data)
-* DynamoDB Local (NoSQL Event & Delivery Logs)
+* PostgreSQL
+* SQLAlchemy
 
-**Serverless**
+Used for:
 
-* AWS Lambda (Local Python invocation / SAM compatible)
+* Users
+* Products
+* Orders
+* Webhook subscriptions
 
-**Security**
+### NoSQL Database
+
+* DynamoDB Local
+
+Used for:
+
+* Event logging
+* Webhook delivery logs
+
+### Serverless
+
+* AWS Lambda (Local simulation using `importlib`)
+* AWS `boto3` integration for real AWS mode
+
+### Authentication
+
+* Flask-JWT-Extended (JWT Bearer Tokens)
+
+### Validation
+
+* Marshmallow
+
+---
+
+# Key Features
+
+## Phase 1 — Core Backend
 
 * JWT Authentication
-* HMAC-SHA256 Webhook Signatures
+* Secure password hashing
+* RESTful CRUD APIs
+* Entity relationships:
 
-**Testing**
-
-* Pytest
-* pytest-mock
-* pytest-flask
-* In-memory SQLite used during tests
-
----
-
-# ✨ Elite / Bonus Features Implemented
-
-* **Idempotency Keys**
-  Prevents duplicate order placement.
-
-* **Webhook Circuit Breaker**
-  Automatically disables webhook subscriptions after **5 consecutive failures**.
-
-* **Dead Letter Queue (DLQ)**
-  Failed webhook deliveries stored in **PostgreSQL** for manual retry.
-
-* **Webhook Rate Limiting**
-  Custom DynamoDB GSI implementation limiting deliveries to **100/hour**.
-
-* **API Versioning**
-  All routes are versioned under `/api/v1/`.
-
-* **Request Tracing & JSON Logging**
-  End-to-end `request_id` tracking from Flask → Lambda → DynamoDB.
+  * Users
+  * Products
+  * Orders
 
 ---
 
-# 🛠 Local Setup Instructions
+## Phase 2 — Event-Driven Architecture
 
-## 1. Clone the Repository
+* Asynchronous order processing
+* Lambda-style event execution
+* Race-condition prevention using:
+
+```sql
+SELECT ... FOR UPDATE
+```
+
+* Immutable event tracking in **DynamoDB**
+* Global Secondary Indexes (GSI) for event queries
+
+---
+
+## Phase 3 — Enterprise Webhooks
+
+Secure webhook delivery system featuring:
+
+* HTTP POST delivery to subscriber URLs
+* **HMAC-SHA256 payload signing**
+* **5-second request timeout**
+* **3 retry attempts**
+* **Exponential backoff strategy**
+* Delivery logging for observability
+
+Webhook delivery logs stored in:
+
+```
+WebhookDeliveries DynamoDB table
+```
+
+---
+
+# Local Setup Instructions
+
+## 1. Clone Repository
 
 ```bash
-git clone https://github.com/yourusername/order-processing-system.git
+git clone <repo-url>
 cd order-processing-system
 ```
 
 ---
 
-## 2. Setup Virtual Environment
+## 2. Start Docker Services
+
+```bash
+docker-compose up -d
+```
+
+This starts:
+
+* PostgreSQL → **port 5432**
+* DynamoDB Local → **port 8000**
+
+---
+
+## 3. Setup Python Environment
 
 ```bash
 python -m venv venv
 ```
 
-Activate:
+Activate environment:
 
 **Windows**
 
@@ -107,7 +174,7 @@ Activate:
 venv\Scripts\activate
 ```
 
-**Mac/Linux**
+**Linux / Mac**
 
 ```bash
 source venv/bin/activate
@@ -121,44 +188,33 @@ pip install -r requirements.txt
 
 ---
 
-## 3. Start Infrastructure (Docker)
+# Configure Environment Variables
 
-Ensure Docker is running.
+Copy example file:
 
 ```bash
-docker-compose up -d
+cp .env.example .env
 ```
 
-This starts:
+Update the values:
 
-* PostgreSQL
-* DynamoDB Local
-
----
-
-# 🔑 Environment Variables (.env.example)
-
-Create a `.env` file in the root directory.
-
-```env
+```ini
 FLASK_APP=run.py
-FLASK_ENV=development
+FLASK_ENV=dev
 
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/orders_db
+DATABASE_URL=postgresql://postgres:postgrespassword@localhost:5432/order_processing_db
 
-JWT_SECRET_KEY=your-super-secret-jwt-key-change-in-prod
+JWT_SECRET_KEY=your-super-secret-key
 
 LAMBDA_MODE=local
 
+DYNAMODB_URL=http://localhost:8000
 AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=test
-AWS_SECRET_ACCESS_KEY=test
-AWS_ENDPOINT_URL=http://localhost:8000
 ```
 
 ---
 
-# Initialize Databases
+# Initialize Database
 
 Run migrations:
 
@@ -168,340 +224,268 @@ flask db upgrade
 
 ---
 
-# Run the Application
+# Run Application
 
 ```bash
-flask run
+python run.py
 ```
 
 ---
 
-# 🧪 Testing Instructions
+# Lambda Functions Overview
 
-The system includes a **comprehensive Pytest suite (24 tests)** covering:
+## process_order
 
-* Unit tests
-* Integration tests
-* Lambda handler logic
-
-Run the test suite:
-
-```bash
-python -m pytest -v
-```
-
----
-
-# End-to-End Testing Flow (Manual / Postman)
-
-### 1. Register & Login
-
-```
-POST /api/v1/auth/register
-POST /api/v1/auth/login
-```
-
-Retrieve JWT token.
-
----
-
-### 2. Create Product
-
-Create a product with stock using admin endpoint.
-
----
-
-### 3. Register Webhook
-
-```
-POST /api/v1/webhooks
-```
-
-Example body:
-
-```json
-{
- "target_url": "http://127.0.0.1:5000/api/v1/webhook-receiver/listen",
- "event_type": "all"
-}
-```
-
----
-
-### 4. Place Order
-
-```
-POST /api/v1/orders
-```
-
-Include header:
-
-```
-Idempotency-Key: unique-key
-```
-
----
-
-### 5. Trigger Processing
-
-Flask automatically invokes the **process_order Lambda**.
-
----
-
-### 6. Verify Order Status
-
-```
-GET /api/v1/orders/<id>
-```
-
-Status should become **confirmed**.
-
----
-
-### 7. Verify Inventory
-
-Ensure stock was decremented via **row-level locking**.
-
----
-
-### 8. Verify Event Log
-
-```
-GET /api/v1/events
-```
-
-Event stored in **DynamoDB with request_id**.
-
----
-
-### 9. Verify Webhook Delivery
-
-```
-GET /api/v1/webhooks/deliveries
-```
-
-Shows webhook POST log in DynamoDB.
-
----
-
-### 10. Verify Receiver
-
-The Flask terminal logs webhook receipt confirming **HMAC-SHA256 verification**.
-
----
-
-# 📚 Lambda Function Documentation
-
-### process_order
+Responsibilities:
 
 * Validates order
-* Simulates payment logic
-* Updates order status
-* Logs event to DynamoDB
-* Triggers other lambdas
+* Simulates payment processing (**80% success rate**)
+* Updates order status in PostgreSQL
 
 ---
 
-### update_inventory
+## update_inventory
 
-Handles:
-
-* `reduce_stock`
-* `restore_stock`
-
-Uses PostgreSQL row-level locking:
+Uses **PostgreSQL row-level locking**:
 
 ```sql
 SELECT ... FOR UPDATE
 ```
 
-Prevents race conditions.
+This ensures:
+
+* Safe stock updates
+* No race conditions during concurrent orders
 
 ---
 
-### send_webhook
+## send_webhook
+
+Triggered automatically when a **DynamoDB event is created**.
 
 Responsibilities:
 
-* Query active subscriptions
-* Sign payload with **HMAC-SHA256**
-* Enforce **100/hour rate limit**
-* Send HTTP POST request
-* Retry with exponential backoff **(2s / 4s / 8s)**
-* Log delivery to DynamoDB
-* Send failures to DLQ
-* Trigger circuit breaker when needed
+1. Find active webhook subscribers
+2. Sign payload using **HMAC-SHA256**
+3. Send HTTP POST request
+4. Retry failed requests (max **3 attempts**)
+5. Use **exponential backoff**
+6. Log:
+
+* HTTP status code
+* latency
+* attempt count
+
+All delivery logs are stored in **DynamoDB**.
 
 ---
 
-# 📦 Webhook Payload Format
+# API Documentation
 
-Every webhook delivery uses this JSON structure:
+# Auth & System Endpoints
 
-```json
-{
- "event": "order_confirmed",
- "delivery_id": "550e8400-e29b-41d4-a716-446655440000",
- "timestamp": "2026-03-13T12:00:00Z",
- "data": {
-   "order_id": "123e4567-e89b-12d3-a456-426614174000",
-   "order_number": "ORD-20260313-ABCD",
-   "status": "confirmed",
-   "total_amount": 149.99,
-   "items": []
- }
-}
+### Register User
+
+```
+POST /api/auth/register
 ```
 
 ---
 
-# 🌐 API Endpoints Reference
-
-## Auth
+### Login
 
 ```
-POST /api/v1/auth/register
-POST /api/v1/auth/login
+POST /api/auth/login
 ```
 
----
-
-## Products
+Returns:
 
 ```
-GET /api/v1/products
-GET /api/v1/products/<id>
-POST /api/v1/products
-PUT /api/v1/products/<id>
-DELETE /api/v1/products/<id>
+JWT Access Token
 ```
 
 ---
 
-## Orders
+### Health Check
 
 ```
-POST /api/v1/orders
-GET /api/v1/orders
-GET /api/v1/orders/<id>
-PUT /api/v1/orders/<id>/cancel
+GET /api/health
 ```
 
----
+Checks connectivity for:
 
-## Webhooks
-
-```
-POST /api/v1/webhooks
-GET /api/v1/webhooks
-GET /api/v1/webhooks/<id>
-PATCH /api/v1/webhooks/<id>/toggle
-DELETE /api/v1/webhooks/<id>
-POST /api/v1/webhooks/<id>/test
-```
-
----
-
-## Webhook Delivery Logs
-
-```
-GET /api/v1/webhooks/deliveries
-GET /api/v1/webhooks/stats
-GET /api/v1/webhooks/dlq
-POST /api/v1/webhooks/dlq/<id>/resolve
-```
-
----
-
-## Receiver Endpoint
-
-```
-POST /api/v1/webhook-receiver/listen
-```
-
-Used to verify webhook delivery.
-
----
-
-## System & Events
-
-```
-GET /api/v1/events
-GET /api/v1/health
-```
-
-Checks connectivity with:
-
-* Flask
+* API
 * PostgreSQL
 * DynamoDB
-* Lambdas
 
 ---
 
-# API cURL Examples
+# Product Endpoints
 
-Replace `YOUR_JWT_TOKEN` with the token from login.
+### List Products
 
----
+```
+GET /api/products
+```
 
-## Register
+Supports:
 
-```bash
-curl -X POST http://127.0.0.1:5000/api/v1/auth/register \
--H "Content-Type: application/json" \
--d '{"username":"merchant","email":"merchant@test.com","password":"password123"}'
+```
+page
+per_page
+search
 ```
 
 ---
 
-## Login
+### Create Product (Admin)
 
-```bash
-curl -X POST http://127.0.0.1:5000/api/v1/auth/login \
--H "Content-Type: application/json" \
--d '{"username":"merchant","password":"password123"}'
+```
+POST /api/products
 ```
 
 ---
 
-## Create Product
+### Update Product (Admin)
 
-```bash
-curl -X POST http://127.0.0.1:5000/api/v1/products \
--H "Authorization: Bearer YOUR_JWT_TOKEN" \
--H "Content-Type: application/json" \
--d '{"name":"Mechanical Keyboard","sku":"KB-001","price":120.00,"stock_quantity":50}'
+```
+PUT /api/products/<id>
 ```
 
 ---
 
-## Register Webhook
+# Order Endpoints (JWT Required)
 
-```bash
-curl -X POST http://127.0.0.1:5000/api/v1/webhooks \
--H "Authorization: Bearer YOUR_JWT_TOKEN" \
--H "Content-Type: application/json" \
--d '{"target_url":"http://127.0.0.1:5000/api/v1/webhook-receiver/listen","event_type":"all"}'
+### Place Order
+
+```
+POST /api/orders
+```
+
+Triggers:
+
+* `process_order`
+* `update_inventory`
+
+---
+
+### List Orders
+
+```
+GET /api/orders
 ```
 
 ---
 
-## Place Order
+### Get Order Details
 
-```bash
-curl -X POST http://127.0.0.1:5000/api/v1/orders \
--H "Authorization: Bearer YOUR_JWT_TOKEN" \
--H "Idempotency-Key: postman-test-key-001" \
--H "Content-Type: application/json" \
--d '{"shipping_address":"123 Main St","items":[{"product_id":"REPLACE_WITH_PRODUCT_UUID","quantity":1}]}'
+```
+GET /api/orders/<id>
 ```
 
 ---
 
-## Health Check
+### Cancel Order
 
-```bash
-curl -X GET http://127.0.0.1:5000/api/v1/health
+```
+PUT /api/orders/<id>/cancel
 ```
 
+Restores stock.
+
+---
+
+### View Order Events
+
+```
+GET /api/orders/<id>/events
+```
+
+Returns the DynamoDB **event timeline**.
+
+---
+
+# Webhook Management Endpoints (JWT Required)
+
+### Create Webhook Subscription
+
+```
+POST /api/webhooks
+```
+
+Returns a `secret_key` used for **HMAC verification**.
+
+---
+
+### List Webhooks
+
+```
+GET /api/webhooks
+```
+
+---
+
+### Update Webhook
+
+```
+PUT /api/webhooks/<id>
+```
+
+---
+
+### Pause / Resume Webhook
+
+```
+PATCH /api/webhooks/<id>/toggle
+```
+
+---
+
+### Delete Webhook
+
+```
+DELETE /api/webhooks/<id>
+```
+
+---
+
+# Webhook Delivery Dashboard
+
+### View All Deliveries
+
+```
+GET /api/webhooks/deliveries
+```
+
+---
+
+### Deliveries for Specific Webhook
+
+```
+GET /api/webhooks/<webhook_id>/deliveries
+```
+
+---
+
+### Failed Deliveries
+
+```
+GET /api/webhooks/deliveries/failed
+```
+
+---
+
+# Testing Endpoint
+
+Mock merchant receiver for webhook testing.
+
+```
+POST /api/webhook-receiver/listen
+```
+
+Requirements:
+
+* `X-Webhook-Signature` header
+* `?secret=` query parameter
+
+Used to verify **HMAC-SHA256 signature validation**.

@@ -1,14 +1,9 @@
 import uuid
-import boto3
-import logging
 from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Key
-from app.utils import logger
 from lambdas.shared.dynamo_utils import get_dynamodb_resource
 from app.services.lambda_invoker import LambdaInvoker
-from flask import g, has_request_context
-from botocore.exceptions import ClientError
-
+import logging
 
 class DynamoDBService:
     @staticmethod
@@ -17,14 +12,11 @@ class DynamoDBService:
         return dynamodb.Table('OrderEvents')
 
     @staticmethod
-    def put_event(order_id, event_type, payload=None, processed_by="system", request_id=None):
+    def put_event(order_id, event_type, payload, processed_by):
         table = DynamoDBService.get_table()
         
         event_id = str(uuid.uuid4())
         timestamp = datetime.now(timezone.utc).isoformat()
-
-        if not request_id and has_request_context() and hasattr(g, 'request_id'):
-            request_id = g.request_id
         
         item = {
             'order_id': str(order_id),
@@ -33,8 +25,7 @@ class DynamoDBService:
             'event_type': event_type,
             'payload': payload,
             'processed_by': processed_by,
-            'created_at': timestamp,
-            'request_id': request_id or 'N/A'
+            'created_at': timestamp
         }
         
         try:
@@ -44,8 +35,7 @@ class DynamoDBService:
             webhook_payload = {
                 "order_id": str(order_id),
                 "event_type": event_type,
-                "payload": payload or {},
-                "request_id": request_id or 'N/A'
+                "payload": payload or {}
             }
             try:
                 # In a real AWS environment, DynamoDB Streams handles this asynchronously.
@@ -131,9 +121,6 @@ class DynamoDBService:
     @staticmethod
     def log_delivery(webhook_id, url, event_type, payload, status_code, success, attempts, error=None):
         table = get_dynamodb_resource().Table('WebhookDeliveries')
-
-        if not request_id and has_request_context() and hasattr(g, 'request_id'):
-            request_id = g.request_id
         item = {
             'delivery_id': str(uuid.uuid4()),
             'webhook_id': str(webhook_id),
@@ -144,29 +131,7 @@ class DynamoDBService:
             'status_code': status_code,
             'success': success,
             'attempts': attempts,
-            'error': error,
-            'request_id': request_id or 'N/A'
+            'error': error
         }
         table.put_item(Item=item)
         return item
-    
-    @staticmethod
-    def get_delivery_count_last_hour(webhook_id):
-        table = DynamoDBService._get_dynamodb_resource().Table('WebhookDeliveries')
-        from boto3.dynamodb.conditions import Key
-        from datetime import timedelta
-        
-        # Calculate the timestamp for exactly one hour ago
-        one_hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        
-        try:
-            # Query the GSI for items matching the webhook_id and a timestamp >= one hour ago
-            response = table.query(
-                IndexName='WebhookIdIndex',
-                KeyConditionExpression=Key('webhook_id').eq(str(webhook_id)) & Key('timestamp').gte(one_hour_ago),
-                Select='COUNT' # We only want the integer count, not the actual data payloads
-            )
-            return response.get('Count', 0)
-        except Exception as e:
-            logger.error(f"Error checking rate limit in DynamoDB: {e}")
-            return 0

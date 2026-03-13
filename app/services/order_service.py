@@ -15,7 +15,7 @@ class OrderService:
         return f"ORD-{date_str}-{random_str}"
 
     @staticmethod
-    def create_order(user_id, data, idempotency_key=None):
+    def create_order(user_id, data):
         # The database transaction begins implicitly
         try:
             total_amount = 0
@@ -25,8 +25,7 @@ class OrderService:
                 order_number=OrderService.generate_order_number(),
                 user_id=user_id,
                 shipping_address=data['shipping_address'],
-                notes=data.get('notes'),
-                idempotency_key=idempotency_key
+                notes=data.get('notes')
             )
             db.session.add(new_order)
             db.session.flush() # Flush to get the new_order.id without committing yet

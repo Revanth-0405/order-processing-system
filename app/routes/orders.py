@@ -15,15 +15,6 @@ orders_bp = Blueprint('orders', __name__)
 @jwt_required
 def place_order():
     json_data = request.get_json()
-
-    # IDEMPOTENCY CHECK
-    idem_key = request.headers.get('Idempotency-Key')
-    if idem_key:
-        existing_order = Order.query.filter_by(idempotency_key=idem_key).first()
-        if existing_order:
-            # If we've seen this key before, just return the existing order!
-            # We return 200 OK instead of 201 Created to indicate it's a cached response.
-            return jsonify(order_output_schema.dump(existing_order)), 200
     
     # 1. Validate incoming JSON payload
     try:
