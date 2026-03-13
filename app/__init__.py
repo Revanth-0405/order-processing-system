@@ -1,4 +1,6 @@
+import uuid
 import logging
+from flask import request, g
 from flask import Flask
 from app.config import config_by_name
 from app.extensions import db, migrate, jwt
@@ -29,6 +31,18 @@ def create_app(config_name='dev'):
     from app.models.product import Product
     from app.models.order import Order, OrderItem
     
+    # REQUEST TRACING MIDDLEWARE 
+    @app.before_request
+    def before_request():
+        # Generate a unique request ID for tracing
+        g.request_id = str(uuid.uuid4())
+
+    @app.after_request
+    def after_request(response):
+        # Attach the request ID to the response headers
+        if hasattr(g, 'request_id'):
+            response.headers['X-Request-Id'] = g.request_id
+        return response
 
     # our blueprints
     from app.routes.products import products_bp
@@ -38,12 +52,12 @@ def create_app(config_name='dev'):
     from app.routes.events import events_bp
     from app.routes.webhooks import webhooks_bp, webhook_receiver_bp
 
-    app.register_blueprint(products_bp, url_prefix='/api/products')
-    app.register_blueprint(orders_bp, url_prefix='/api/orders')
-    app.register_blueprint(auth_bp, url_prefix='/api/auth')
-    app.register_blueprint(health_bp, url_prefix='/api/health')
-    app.register_blueprint(events_bp, url_prefix='/api/events')
-    app.register_blueprint(webhooks_bp, url_prefix='/api/webhooks')
-    app.register_blueprint(webhook_receiver_bp, url_prefix='/webhooks')
+    app.register_blueprint(products_bp, url_prefix='/api/v1/products')
+    app.register_blueprint(orders_bp, url_prefix='/api/v1/orders')
+    app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
+    app.register_blueprint(health_bp, url_prefix='/api/v1/health')
+    app.register_blueprint(events_bp, url_prefix='/api/v1/events')
+    app.register_blueprint(webhooks_bp, url_prefix='/api/v1/webhooks')
+    app.register_blueprint(webhook_receiver_bp, url_prefix='/api/v1/webhook-receiver')
 
     return app
