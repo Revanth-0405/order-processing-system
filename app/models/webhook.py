@@ -16,6 +16,7 @@ class WebhookSubscription(db.Model):
     
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    failure_count = db.Column(db.Integer, default=0, nullable=False)
 
     __table_args__ = (
         db.UniqueConstraint('user_id', 'target_url', 'event_type', name='uq_user_url_event'),
