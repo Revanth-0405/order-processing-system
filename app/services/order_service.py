@@ -25,7 +25,8 @@ class OrderService:
                 order_number=OrderService.generate_order_number(),
                 user_id=user_id,
                 shipping_address=data['shipping_address'],
-                notes=data.get('notes')
+                notes=data.get('notes'),
+                idempotency_key=idempotency_key
             )
             db.session.add(new_order)
             db.session.flush() # Flush to get the new_order.id without committing yet
