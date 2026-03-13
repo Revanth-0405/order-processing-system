@@ -489,3 +489,17 @@ Requirements:
 * `?secret=` query parameter
 
 Used to verify **HMAC-SHA256 signature validation**.
+
+## End-to-End Testing Flow (Postman / Manual)
+To verify the complete architecture (Phase 4 E2E Requirement), follow these 10 steps:
+
+1. **Register & Login:** `POST /api/v1/auth/register` and `POST /api/v1/auth/login` to retrieve your JWT.
+2. **Create Product:** Create a product with stock directly in the DB or via the Admin Product endpoint.
+3. **Register Webhook:** `POST /api/v1/webhooks` with `"target_url": "http://127.0.0.1:5000/api/v1/webhook-receiver/listen"` and `"event_type": "all"`.
+4. **Place Order:** `POST /api/v1/orders` passing the product ID and a unique `Idempotency-Key` header.
+5. **Trigger Processing:** The Flask route automatically invokes the `process_order` Lambda.
+6. **Verify Order Status:** `GET /api/v1/orders/<id>` confirms status changed to `confirmed`.
+7. **Verify Inventory:** Check the product to ensure stock was decremented safely.
+8. **Verify Event Log:** `GET /api/v1/events` confirms the event is stored in DynamoDB with a `request_id`.
+9. **Verify Webhook Delivery Log:** `GET /api/v1/webhooks/deliveries` confirms DynamoDB tracked the webhook POST.
+10. **Verify Receiver:** The terminal running Flask will log `✅ WEBHOOK RECEIVED & VERIFIED`, confirming HMAC-SHA256 signature validation.
