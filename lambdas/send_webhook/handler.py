@@ -3,11 +3,13 @@ import hmac
 import hashlib
 import json
 import time
+import uuid
+from app.extensions import db
+from datetime import datetime, timezone
 from app.utils.logger import setup_logger
 from app.models.webhook import WebhookSubscription, WebhookDLQ
 from app.models.order import Order
 from app.services.dynamodb_service import DynamoDBService
-from app.extensions import db
 
 logger = setup_logger(__name__, service_name="lambda_send_webhook")
 
@@ -28,10 +30,17 @@ def handler(event, context):
 
     results = []
     
-    # Standardized Payload
-    delivery_payload = {"event": event_type, "order_id": str(order_id), "data": payload}
+    delivery_id = str(uuid.uuid4())
+    timestamp_iso = datetime.now(timezone.utc).isoformat()
+    delivery_payload = {
+        "event": event_type, 
+        "delivery_id": delivery_id,
+        "timestamp": timestamp_iso,
+        "data": payload
+    }
+    
     payload_bytes = json.dumps(delivery_payload, separators=(',', ':')).encode('utf-8')
-
+    
     for sub in subscriptions:
         # RATE LIMITING LOGIC
         delivery_count = DynamoDBService.get_delivery_count_last_hour(sub.id)
@@ -40,7 +49,13 @@ def handler(event, context):
             continue # Skip to the next subscriber!
 
         signature = hmac.new(sub.secret_key.encode('utf-8'), payload_bytes, hashlib.sha256).hexdigest()
-        headers = {'Content-Type': 'application/json', 'X-Webhook-Signature': signature}
+        headers = {
+            'Content-Type': 'application/json', 
+            'X-Webhook-Signature': signature,
+            'X-Webhook-Event': event_type,
+            'X-Webhook-Delivery-ID': delivery_id,
+            'X-Webhook-Timestamp': timestamp_iso
+        }
         
         max_retries = 3
         success = False
@@ -48,6 +63,8 @@ def handler(event, context):
         error_msg = None
         
         # Exponential backoff retry loop
+        backoff_intervals = [2, 4, 8] 
+        
         for attempt in range(max_retries):
             try:
                 resp = requests.post(sub.target_url, data=payload_bytes, headers=headers, timeout=5)
@@ -60,9 +77,9 @@ def handler(event, context):
                 error_msg = str(e)
             
             if attempt < max_retries - 1:
-                time.sleep(2 ** attempt) 
+                time.sleep(backoff_intervals[attempt]) 
         
-        # --- BONUS: CIRCUIT BREAKER LOGIC ---
+        # CIRCUIT BREAKER LOGIC ---
         if success:
             sub.failure_count = 0  # Reset on success
         else:

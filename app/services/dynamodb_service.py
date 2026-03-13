@@ -7,6 +7,7 @@ from app.utils import logger
 from lambdas.shared.dynamo_utils import get_dynamodb_resource
 from app.services.lambda_invoker import LambdaInvoker
 from flask import g, has_request_context
+from botocore.exceptions import ClientError
 
 
 class DynamoDBService:

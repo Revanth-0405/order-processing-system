@@ -25,6 +25,10 @@ def create_app(config_name='dev'):
 
     from lambdas.shared.dynamo_utils import create_order_events_table
     create_order_events_table()
+    
+    # Initialize Webhook Deliveries Table
+    from app.services.dynamodb_service import DynamoDBService
+    DynamoDBService.create_webhook_deliveries_table()
 
     #import models here
     from app.models.user import User

@@ -15,7 +15,7 @@ class OrderService:
         return f"ORD-{date_str}-{random_str}"
 
     @staticmethod
-    def create_order(user_id, data):
+    def create_order(user_id, data, idempotency_key=None):
         # The database transaction begins implicitly
         try:
             total_amount = 0
