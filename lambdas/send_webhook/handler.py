@@ -1,16 +1,22 @@
-import logging
 import requests
 import hmac
 import hashlib
 import json
 import time
-from app.models.webhook import WebhookSubscription
+import uuid
+from app.extensions import db
+from datetime import datetime, timezone
+from app.utils.logger import setup_logger
+from app.models.webhook import WebhookSubscription, WebhookDLQ
 from app.models.order import Order
 from app.services.dynamodb_service import DynamoDBService
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__, service_name="lambda_send_webhook")
 
 def handler(event, context):
+    request_id = event.get('request_id', 'N/A')
+    logger.info(f"Lambda send_webhook invoked for order {event.get('order_id')}", extra={'request_id': request_id})
+    
     order_id = event.get('order_id')
     event_type = event.get('event_type')
     payload = event.get('payload', {})
@@ -24,20 +30,40 @@ def handler(event, context):
 
     results = []
     
-    # Standardized Payload
-    delivery_payload = {"event": event_type, "order_id": str(order_id), "data": payload}
+    delivery_id = str(uuid.uuid4())
+    timestamp_iso = datetime.now(timezone.utc).isoformat()
+    delivery_payload = {
+        "event": event_type, 
+        "delivery_id": delivery_id,
+        "timestamp": timestamp_iso,
+        "data": payload
+    }
+    
     payload_bytes = json.dumps(delivery_payload, separators=(',', ':')).encode('utf-8')
-
+    
     for sub in subscriptions:
-        # 1. HMAC-SHA256 SIGNING
+        # RATE LIMITING LOGIC
+        delivery_count = DynamoDBService.get_delivery_count_last_hour(sub.id)
+        if delivery_count >= 100:
+            logger.warning(f"RATE LIMIT EXCEEDED: Webhook {sub.id} has {delivery_count} deliveries in the last hour. Skipping.", extra={'request_id': request_id})
+            continue # Skip to the next subscriber!
+
         signature = hmac.new(sub.secret_key.encode('utf-8'), payload_bytes, hashlib.sha256).hexdigest()
-        headers = {'Content-Type': 'application/json', 'X-Webhook-Signature': signature}
+        headers = {
+            'Content-Type': 'application/json', 
+            'X-Webhook-Signature': signature,
+            'X-Webhook-Event': event_type,
+            'X-Webhook-Delivery-ID': delivery_id,
+            'X-Webhook-Timestamp': timestamp_iso
+        }
         
-        # 2. EXPONENTIAL BACKOFF RETRY LOGIC (Max 3 attempts: 0s, 2s, 4s)
         max_retries = 3
         success = False
         status_code = None
         error_msg = None
+        
+        # Exponential backoff retry loop
+        backoff_intervals = [2, 4, 8] 
         
         for attempt in range(max_retries):
             try:
@@ -45,20 +71,42 @@ def handler(event, context):
                 status_code = resp.status_code
                 if resp.ok:
                     success = True
-                    break # Success! Exit the retry loop
+                    break 
                 error_msg = f"HTTP {status_code}"
             except requests.exceptions.RequestException as e:
                 error_msg = str(e)
             
-            # If not successful and not the last attempt, backoff and retry
             if attempt < max_retries - 1:
-                time.sleep(2 ** attempt) # Waits 1s, then 2s
+                time.sleep(backoff_intervals[attempt]) 
         
-        # 3. DYNAMODB LOGGING
+        # CIRCUIT BREAKER LOGIC ---
+        if success:
+            sub.failure_count = 0  # Reset on success
+        else:
+            sub.failure_count += 1 # Increment on total failure
+            logger.warning(f"Webhook {sub.id} failed {sub.failure_count} consecutive times.", extra={'request_id': request_id})
+            
+            dlq_item = WebhookDLQ(
+                webhook_id=sub.id,
+                payload=payload_bytes.decode('utf-8'),
+                error_message=error_msg
+            )
+            db.session.add(dlq_item)
+            logger.info(f"Payload routed to Dead Letter Queue for webhook {sub.id}", extra={'request_id': request_id})
+
+            if sub.failure_count >= 5:
+                sub.is_active = False
+                # In a real app, you would queue an email to the user here.
+                logger.error(f"CIRCUIT BREAKER TRIPPED! Webhook {sub.id} disabled after 5 consecutive failures.", extra={'request_id': request_id})
+        
+        # Save the circuit breaker status to PostgreSQL
+        db.session.commit()
+        # ------------------------------------
+        
         DynamoDBService.log_delivery(
             webhook_id=sub.id, url=sub.target_url, event_type=event_type, 
             payload=delivery_payload, status_code=status_code or 0, 
-            success=success, attempts=attempt + 1, error=error_msg
+            success=success, attempts=attempt + 1, error=error_msg, request_id=request_id
         )
         
         results.append({"url": sub.target_url, "success": success})
