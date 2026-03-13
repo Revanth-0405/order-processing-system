@@ -3,6 +3,7 @@ import boto3
 import logging
 from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Key
+from app.utils import logger
 from lambdas.shared.dynamo_utils import get_dynamodb_resource
 from app.services.lambda_invoker import LambdaInvoker
 from flask import g, has_request_context
@@ -147,3 +148,24 @@ class DynamoDBService:
         }
         table.put_item(Item=item)
         return item
+    
+    @staticmethod
+    def get_delivery_count_last_hour(webhook_id):
+        table = DynamoDBService._get_dynamodb_resource().Table('WebhookDeliveries')
+        from boto3.dynamodb.conditions import Key
+        from datetime import timedelta
+        
+        # Calculate the timestamp for exactly one hour ago
+        one_hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        
+        try:
+            # Query the GSI for items matching the webhook_id and a timestamp >= one hour ago
+            response = table.query(
+                IndexName='WebhookIdIndex',
+                KeyConditionExpression=Key('webhook_id').eq(str(webhook_id)) & Key('timestamp').gte(one_hour_ago),
+                Select='COUNT' # We only want the integer count, not the actual data payloads
+            )
+            return response.get('Count', 0)
+        except Exception as e:
+            logger.error(f"Error checking rate limit in DynamoDB: {e}")
+            return 0

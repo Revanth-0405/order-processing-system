@@ -33,6 +33,12 @@ def handler(event, context):
     payload_bytes = json.dumps(delivery_payload, separators=(',', ':')).encode('utf-8')
 
     for sub in subscriptions:
+        # RATE LIMITING LOGIC
+        delivery_count = DynamoDBService.get_delivery_count_last_hour(sub.id)
+        if delivery_count >= 100:
+            logger.warning(f"RATE LIMIT EXCEEDED: Webhook {sub.id} has {delivery_count} deliveries in the last hour. Skipping.", extra={'request_id': request_id})
+            continue # Skip to the next subscriber!
+
         signature = hmac.new(sub.secret_key.encode('utf-8'), payload_bytes, hashlib.sha256).hexdigest()
         headers = {'Content-Type': 'application/json', 'X-Webhook-Signature': signature}
         
@@ -70,7 +76,7 @@ def handler(event, context):
             )
             db.session.add(dlq_item)
             logger.info(f"Payload routed to Dead Letter Queue for webhook {sub.id}", extra={'request_id': request_id})
-            
+
             if sub.failure_count >= 5:
                 sub.is_active = False
                 # In a real app, you would queue an email to the user here.
