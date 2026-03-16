@@ -21,22 +21,31 @@ def handler(event, context):
     event_type = event.get('event_type')
     payload = event.get('payload', {})
 
-    order = Order.query.get(order_id)
+    # PHASE 4 FIX: Use SQLAlchemy 2.0 Session.get
+    order = db.session.get(Order, order_id)
     if not order: return {"status": "error"}
 
-    subscriptions = WebhookSubscription.query.filter_by(user_id=order.user_id, is_active=True).filter(
-        (WebhookSubscription.event_type == event_type) | (WebhookSubscription.event_type == 'all')
-    ).all()
+    # PHASE 3 FIX: Memory filter for JSON array to prevent dialect clashes
+    all_subs = WebhookSubscription.query.filter_by(user_id=order.user_id, is_active=True).all()
+    subscriptions = [s for s in all_subs if event_type in s.event_types or "all" in s.event_types]
 
     results = []
     
     delivery_id = str(uuid.uuid4())
     timestamp_iso = datetime.now(timezone.utc).isoformat()
+    
+    # PHASE 3 FIX: Full standard payload format as requested by the reviewer
     delivery_payload = {
         "event": event_type, 
         "delivery_id": delivery_id,
         "timestamp": timestamp_iso,
-        "data": payload
+        "data": {
+            "order_id": str(order.id),
+            "order_number": order.order_number,
+            "status": order.status,
+            "total_amount": float(order.total_amount),
+            "items": [{"product_id": str(i.product_id), "qty": i.quantity} for i in order.items]
+        }
     }
     
     payload_bytes = json.dumps(delivery_payload, separators=(',', ':')).encode('utf-8')
@@ -62,12 +71,13 @@ def handler(event, context):
         status_code = None
         error_msg = None
         
-        # Exponential backoff retry loop
+        # Exponential backoff retry loop [2, 4, 8]
         backoff_intervals = [2, 4, 8] 
         
         for attempt in range(max_retries):
             try:
-                resp = requests.post(sub.target_url, data=payload_bytes, headers=headers, timeout=5)
+                # PHASE 3 FIX: Timeout changed to 10s per the spec
+                resp = requests.post(sub.target_url, data=payload_bytes, headers=headers, timeout=10)
                 status_code = resp.status_code
                 if resp.ok:
                     success = True
@@ -96,7 +106,6 @@ def handler(event, context):
 
             if sub.failure_count >= 5:
                 sub.is_active = False
-                # In a real app, you would queue an email to the user here.
                 logger.error(f"CIRCUIT BREAKER TRIPPED! Webhook {sub.id} disabled after 5 consecutive failures.", extra={'request_id': request_id})
         
         # Save the circuit breaker status to PostgreSQL

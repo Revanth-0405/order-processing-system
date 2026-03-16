@@ -13,10 +13,9 @@ orders_bp = Blueprint('orders', __name__)
 
 @orders_bp.route('', methods=['POST'])
 @jwt_required
-def place_order():
-    json_data = request.get_json()
-
-    # IDEMPOTENCY CHECK
+def create_order():
+    user_id = get_jwt_identity()
+    data = request.get_json()
     idem_key = request.headers.get('Idempotency-Key')
     if idem_key:
         existing_order = Order.query.filter_by(idempotency_key=idem_key).first()
@@ -27,7 +26,7 @@ def place_order():
     
     # 1. Validate incoming JSON payload
     try:
-        data = order_input_schema.load(json_data)
+        data = order_input_schema.load(data)
     except ValidationError as err:
         return jsonify(err.messages), 400
         
@@ -36,11 +35,11 @@ def place_order():
     
     # 3. Process the order
     try:
-        new_order = OrderService.create_order(user_id, data)
-        return jsonify(order_output_schema.dump(new_order)), 201
-    except ValueError as ve:
-        # Catch our custom validation errors (like insufficient stock)
-        return jsonify({'message': str(ve)}), 400
+        # CRITICAL FIX 4: Actually pass the key to the service!
+        new_order = OrderService.create_order(user_id, data, idempotency_key=idem_key)
+        return jsonify({"message": "Order placed", "order_id": new_order.id}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({'message': 'An error occurred while placing the order.'}), 500
     
