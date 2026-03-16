@@ -1,6 +1,7 @@
 import datetime
 import random
 import string
+import uuid
 from app.extensions import db
 from app.models.order import Order, OrderItem
 from app.models.product import Product
@@ -16,6 +17,10 @@ class OrderService:
 
     @staticmethod
     def create_order(user_id, data, idempotency_key=None):
+        # CRITICAL FIX: Convert the JWT string user_id into a real UUID object for SQLAlchemy
+        if isinstance(user_id, str):
+            user_id = uuid.UUID(user_id)
+            
         # The database transaction begins implicitly
         try:
             total_amount = 0
@@ -33,7 +38,13 @@ class OrderService:
 
             # 2. Process Order Items and Validate Stock
             for item_data in data['items']:
-                product = Product.query.get(item_data['product_id'])
+                
+                # CRITICAL FIX: Safely branch the locking logic. 
+                # SQLite (Tests) gets standard get(). Postgres (Production) gets the lock.
+                if db.engine.dialect.name == 'sqlite':
+                    product = db.session.get(Product, item_data['product_id'])
+                else:
+                    product = db.session.get(Product, item_data['product_id'], with_for_update=True)
                 
                 # Validation checks
                 if not product or not product.is_active:
@@ -49,11 +60,10 @@ class OrderService:
                     order_id=new_order.id,
                     product_id=product.id,
                     quantity=item_data['quantity'],
-                    unit_price=unit_price,
-                    subtotal=subtotal
+                    unit_price=unit_price
                 )
                 db.session.add(order_item)
-
+                
             new_order.total_amount = total_amount
             db.session.commit() # Atomic commit for Order + OrderItems
             
@@ -74,7 +84,6 @@ class OrderService:
                     }
                     LambdaInvoker.invoke('update_inventory', inventory_payload)
                     
-                    # Note: We will add the send_webhook invocation here in Phase 3
             except Exception as e:
                 # In a real system, we'd use a Dead Letter Queue (DLQ) for failed invocations
                 print(f"Failed to invoke async lambdas: {e}")
@@ -86,6 +95,8 @@ class OrderService:
     
     @staticmethod
     def get_user_orders(user_id, page=1, per_page=10, status=None):
+        if isinstance(user_id, str):
+            user_id = uuid.UUID(user_id)
         query = Order.query.filter_by(user_id=user_id)
         
         if status:
@@ -95,6 +106,8 @@ class OrderService:
 
     @staticmethod
     def get_order_by_id(order_id, user_id):
+        if isinstance(user_id, str):
+            user_id = uuid.UUID(user_id)
         # Ensures a user can only fetch their own orders
         return Order.query.filter_by(id=order_id, user_id=user_id).first()
 

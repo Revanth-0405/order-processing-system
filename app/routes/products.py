@@ -1,71 +1,80 @@
 from flask import Blueprint, request, jsonify
 from marshmallow import ValidationError
-from app.services.product_service import ProductService
-from app.schemas.product import product_schema, products_schema
-from app.utils.decorators import admin_required
+from flask_jwt_extended import get_jwt_identity
+from app.extensions import db
+from app.models.order import Order
+from app.services.order_service import OrderService
+from app.schemas.order import order_schema, orders_schema
+from app.utils.decorators import jwt_required, current_user_is_admin
+from app.services.dynamodb_service import DynamoDBService
 
-products_bp = Blueprint('products', __name__, url_prefix='/api/products')
+products_bp = Blueprint('products', __name__)
+
+@products_bp.route('', methods=['POST'])
+@jwt_required
+def create_order():
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    idem_key = request.headers.get('Idempotency-Key') # Get from header
+    
+    try:
+        # CRITICAL FIX: Actually pass the idempotency key to the service!
+        new_order = OrderService.create_order(user_id, data, idempotency_key=idem_key)
+        return jsonify({"message": "Order placed", "order_id": new_order.id}), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @products_bp.route('', methods=['GET'])
-def get_products():
+@jwt_required
+def get_orders():
+    user_id = get_jwt_identity()
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
-    search = request.args.get('search', '')
 
-    pagination = ProductService.get_all_products(page, per_page, search)
+    pagination = Order.query.filter_by(user_id=user_id).order_by(Order.created_at.desc()).paginate(page=page, per_page=per_page)
     
     return jsonify({
-        'items': products_schema.dump(pagination.items),
+        'items': orders_schema.dump(pagination.items),
         'total': pagination.total,
         'pages': pagination.pages,
         'current_page': pagination.page
     }), 200
 
-@products_bp.route('/<uuid:product_id>', methods=['GET'])
-def get_product(product_id):
-    product = ProductService.get_product_by_id(product_id)
-    if not product:
-        return jsonify({'message': 'Product not found'}), 404
-    return jsonify(product_schema.dump(product)), 200
-
-@products_bp.route('', methods=['POST'])
-@admin_required
-def create_product():
-    json_data = request.get_json()
-    try:
-        data = product_schema.load(json_data)
-    except ValidationError as err:
-        return jsonify(err.messages), 400
+@products_bp.route('/<uuid:id>', methods=['GET'])
+@jwt_required
+def get_order(id):
+    order = db.session.get(Order, id)
+    if not order:
+        return jsonify({"message": "Order not found"}), 404
         
+    # PHASE 1 FIX: Allow admin to view any order
+    if str(order.user_id) != str(get_jwt_identity()) and not current_user_is_admin():
+        return jsonify({"error": "Unauthorized"}), 403
+        
+    return jsonify(order_schema.dump(order)), 200
+
+@products_bp.route('/<uuid:id>/cancel', methods=['PUT'])
+@jwt_required
+def cancel_order(id):
+    order = db.session.get(Order, id)
+    if not order:
+        return jsonify({"message": "Order not found"}), 404
+        
+    if str(order.user_id) != str(get_jwt_identity()) and not current_user_is_admin():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    if order.status in ['cancelled', 'shipped', 'delivered']:
+        return jsonify({"error": f"Cannot cancel order in {order.status} status"}), 400
+
+    order.status = 'cancelled'
+    db.session.commit()
+    
+    # PHASE 1 FIX: Log cancellation to DynamoDB
     try:
-        new_product = ProductService.create_product(data)
-        return jsonify(product_schema.dump(new_product)), 201
+        DynamoDBService.put_event(order.id, 'order_cancelled', {"reason": "User requested"})
     except Exception as e:
-        return jsonify({'message': str(e)}), 500
+        print(f"Failed to log cancel event: {e}")
 
-@products_bp.route('/<uuid:product_id>', methods=['PUT'])
-@admin_required
-def update_product(product_id):
-    product = ProductService.get_product_by_id(product_id)
-    if not product:
-        return jsonify({'message': 'Product not found'}), 404
-        
-    json_data = request.get_json()
-    try:
-        # Partial validation for updates
-        data = product_schema.load(json_data, partial=True) 
-    except ValidationError as err:
-        return jsonify(err.messages), 400
-        
-    updated_product = ProductService.update_product(product, data)
-    return jsonify(product_schema.dump(updated_product)), 200
-
-@products_bp.route('/<uuid:product_id>', methods=['DELETE'])
-@admin_required
-def delete_product(product_id):
-    product = ProductService.get_product_by_id(product_id)
-    if not product:
-        return jsonify({'message': 'Product not found'}), 404
-        
-    ProductService.soft_delete_product(product)
-    return jsonify({'message': 'Product deleted successfully'}), 200
+    return jsonify({"message": "Order cancelled successfully"}), 200

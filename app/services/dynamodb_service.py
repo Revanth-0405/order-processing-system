@@ -9,7 +9,6 @@ from app.services.lambda_invoker import LambdaInvoker
 from flask import g, has_request_context
 from botocore.exceptions import ClientError
 
-
 class DynamoDBService:
     @staticmethod
     def get_table():
@@ -57,7 +56,6 @@ class DynamoDBService:
         except ClientError as e:
             print(f"Error saving event to DynamoDB: {e.response['Error']['Message']}")
             return None
-
 
     @staticmethod
     def get_events_by_order(order_id):
@@ -129,11 +127,13 @@ class DynamoDBService:
                 print(f"Error creating WebhookDeliveries table: {e}")
 
     @staticmethod
-    def log_delivery(webhook_id, url, event_type, payload, status_code, success, attempts, error=None):
+    # FIX 1: Added request_id=None to the method signature
+    def log_delivery(webhook_id, url, event_type, payload, status_code, success, attempts, error=None, request_id=None):
         table = get_dynamodb_resource().Table('WebhookDeliveries')
 
         if not request_id and has_request_context() and hasattr(g, 'request_id'):
             request_id = g.request_id
+            
         item = {
             'delivery_id': str(uuid.uuid4()),
             'webhook_id': str(webhook_id),
@@ -152,7 +152,8 @@ class DynamoDBService:
     
     @staticmethod
     def get_delivery_count_last_hour(webhook_id):
-        table = DynamoDBService._get_dynamodb_resource().Table('WebhookDeliveries')
+        # FIX 2: Used the correct imported function instead of DynamoDBService._get...
+        table = get_dynamodb_resource().Table('WebhookDeliveries')
         from boto3.dynamodb.conditions import Key
         from datetime import timedelta
         
