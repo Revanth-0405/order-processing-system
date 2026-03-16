@@ -38,6 +38,9 @@ class OrderService:
 
             # 2. Process Order Items and Validate Stock
             for item_data in data['items']:
+
+                if isinstance(item_data['product_id'], str):
+                    item_data['product_id'] = uuid.UUID(item_data['product_id'])
                 
                 # CRITICAL FIX: Safely branch the locking logic. 
                 # SQLite (Tests) gets standard get(). Postgres (Production) gets the lock.
@@ -119,6 +122,13 @@ class OrderService:
         order.status = 'cancelled'
 
         db.session.commit()
+        
+        # CRITICAL FIX: Log the cancellation event to DynamoDB
+        from app.services.dynamodb_service import DynamoDBService
+        try:
+            DynamoDBService.put_event(order.id, 'order_cancelled', {"reason": "User requested"})
+        except Exception as e:
+            print(f"Failed to log cancel event to DynamoDB: {e}")
         
         try:
             inventory_payload = {

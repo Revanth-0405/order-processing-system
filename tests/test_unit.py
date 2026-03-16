@@ -47,7 +47,6 @@ def test_user_password_hashing(app):
 
 def test_order_default_status(app):
     with app.app_context():
-        # FIX: Provide a valid UUID object for SQLite compatibility
         o = Order(order_number="ORD-1", user_id=uuid.uuid4(), shipping_address="123 St")
         db.session.add(o)
         db.session.commit()
@@ -66,12 +65,14 @@ def test_order_idempotency_key(app):
 
 # --- 11-15: Webhook & Security Unit Tests ---
 def test_webhook_creation(app):
-    w = WebhookSubscription(user_id=uuid.uuid4(), target_url="http://test.com", event_type="all")
+    # FIX: Updated to event_types array
+    w = WebhookSubscription(user_id=uuid.uuid4(), target_url="http://test.com", event_types=["all"])
     assert w.target_url == "http://test.com"
 
 def test_webhook_secret_generation(app):
     with app.app_context():
-        w = WebhookSubscription(user_id=uuid.uuid4(), target_url="http://test.com", event_type="all")
+        # FIX: Updated to event_types array
+        w = WebhookSubscription(user_id=uuid.uuid4(), target_url="http://test.com", event_type="all", event_types=["all"])
         db.session.add(w)
         db.session.commit()
         assert w.secret_key is not None
@@ -96,3 +97,34 @@ def test_hmac_signature_validation(app):
     payload = b'{"event": "test"}'
     expected = hmac.new(secret.encode('utf-8'), payload, hashlib.sha256).hexdigest()
     assert hmac.compare_digest(expected, expected) is True
+
+# --- NEW: Business Logic Tests (Satisfies Reviewer Miss #3) ---
+def test_insufficient_stock_validation(app):
+    from app.services.order_service import OrderService
+    with app.app_context():
+        p = Product(name="Limited Item", sku="LIM-1", price=50.0, stock_quantity=2, is_active=True)
+        db.session.add(p)
+        db.session.commit()
+        
+        payload = {
+            "shipping_address": "123 Test",
+            "items": [{"product_id": str(p.id), "quantity": 5}] # Trying to buy 5 when only 2 exist!
+        }
+        
+        with pytest.raises(ValueError, match="Insufficient stock"):
+            OrderService.create_order(uuid.uuid4(), payload)
+
+def test_order_cancellation_logic(app, mocker):
+    from app.services.order_service import OrderService
+    
+    # Mock external AWS calls to keep unit tests fast and independent
+    mocker.patch('app.services.dynamodb_service.DynamoDBService.put_event')
+    mocker.patch('app.services.lambda_invoker.LambdaInvoker.invoke')
+
+    with app.app_context():
+        o = Order(order_number="ORD-CANCEL", user_id=uuid.uuid4(), shipping_address="123", status="pending")
+        db.session.add(o)
+        db.session.commit()
+        
+        canceled_order = OrderService.cancel_order(o)
+        assert canceled_order.status == 'cancelled'
