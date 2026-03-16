@@ -12,58 +12,61 @@ from lambdas.shared.dynamo_utils import get_dynamodb_resource
 from boto3.dynamodb.conditions import Key, Attr
 from app.services.lambda_invoker import LambdaInvoker
 
+# CRITICAL FIX: Import the new service layer
+from app.services.webhook_service import WebhookService 
+
 webhooks_bp = Blueprint('webhooks', __name__)
 
-# --- 1-6. CRUD ENDPOINTS ---
+# --- 1-6. CRUD ENDPOINTS (Refactored to use WebhookService) ---
 @webhooks_bp.route('', methods=['POST'])
 @jwt_required
 def create_webhook():
     user_id = get_jwt_identity()
-    try: data = webhook_schema.load(request.get_json())
-    except ValidationError as err: return jsonify(err.messages), 400
-    if WebhookSubscription.query.filter_by(user_id=user_id, target_url=data['target_url'], event_type=data['event_type']).first():
-        return jsonify({'message': 'Duplicate webhook'}), 400
-    webhook = WebhookSubscription(user_id=user_id, target_url=data['target_url'], event_type=data['event_type'])
-    db.session.add(webhook)
-    db.session.commit()
-    return jsonify(webhook_schema.dump(webhook)), 201
+    data = request.get_json()
+    
+    try:
+        # Pass data to the service, ensuring we use the new 'event_types' list
+        webhook = WebhookService.create_webhook(
+            user_id=user_id, 
+            target_url=data['target_url'], 
+            event_types=data.get('event_types', ["all"])
+        )
+        return jsonify(webhook_schema.dump(webhook)), 201
+    except ValueError as e:
+        return jsonify({'message': str(e)}), 400
 
 @webhooks_bp.route('', methods=['GET'])
 @jwt_required
 def get_webhooks():
-    return jsonify(webhooks_schema.dump(WebhookSubscription.query.filter_by(user_id=get_jwt_identity()).all())), 200
+    webhooks = WebhookService.get_all_by_user(get_jwt_identity())
+    return jsonify(webhooks_schema.dump(webhooks)), 200
 
 @webhooks_bp.route('/<uuid:id>', methods=['GET'])
 @jwt_required
 def get_webhook(id):
-    webhook = WebhookSubscription.query.filter_by(id=id, user_id=get_jwt_identity()).first_or_404()
+    webhook = WebhookService.get_user_webhook(id, get_jwt_identity())
     return jsonify(webhook_schema.dump(webhook)), 200
 
 @webhooks_bp.route('/<uuid:id>', methods=['PUT'])
 @jwt_required
 def update_webhook(id):
-    webhook = WebhookSubscription.query.filter_by(id=id, user_id=get_jwt_identity()).first_or_404()
+    webhook = WebhookService.get_user_webhook(id, get_jwt_identity())
     data = request.get_json()
-    webhook.target_url = data.get('target_url', webhook.target_url)
-    webhook.event_type = data.get('event_type', webhook.event_type)
-    webhook.is_active = data.get('is_active', webhook.is_active)
-    db.session.commit()
-    return jsonify(webhook_schema.dump(webhook)), 200
+    updated_webhook = WebhookService.update_webhook(webhook, data)
+    return jsonify(webhook_schema.dump(updated_webhook)), 200
 
 @webhooks_bp.route('/<uuid:id>/toggle', methods=['PATCH'])
 @jwt_required
 def toggle_webhook(id):
-    webhook = WebhookSubscription.query.filter_by(id=id, user_id=get_jwt_identity()).first_or_404()
-    webhook.is_active = not webhook.is_active
-    db.session.commit()
+    webhook = WebhookService.get_user_webhook(id, get_jwt_identity())
+    WebhookService.toggle_webhook(webhook)
     return jsonify({'message': f"Webhook is now {'active' if webhook.is_active else 'paused'}"}), 200
 
 @webhooks_bp.route('/<uuid:id>', methods=['DELETE'])
 @jwt_required
 def delete_webhook(id):
-    webhook = WebhookSubscription.query.filter_by(id=id, user_id=get_jwt_identity()).first_or_404()
-    db.session.delete(webhook)
-    db.session.commit()
+    webhook = WebhookService.get_user_webhook(id, get_jwt_identity())
+    WebhookService.delete_webhook(webhook)
     return jsonify({'message': 'Deleted'}), 200
 
 # --- 7-10. DELIVERY DASHBOARD ENDPOINTS ---
