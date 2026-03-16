@@ -7,7 +7,10 @@ from app.services.dynamodb_service import DynamoDBService
 logger = logging.getLogger(__name__)
 
 def handler(event, context):
-
+    """
+    AWS Lambda Handler for processing new orders asynchronously.
+    Validates the order, updates status, and logs the event to DynamoDB.
+    """
     if event.get('action') == 'ping':
         return {"status": "ok", "message": "pong"}
     

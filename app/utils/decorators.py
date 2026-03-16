@@ -26,3 +26,12 @@ def admin_required(f):
             
         return f(*args, **kwargs)
     return decorated_function
+
+def current_user_is_admin():
+    """Helper function to check if the current user has admin claims."""
+    try:
+        claims = get_jwt()
+        # Checks if the JWT payload includes 'is_admin': True
+        return claims.get('is_admin', False) 
+    except Exception:
+        return False

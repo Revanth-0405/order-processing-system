@@ -1,0 +1,26 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Order Processing System Lambdas
+
+Resources:
+  ProcessOrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/process_order/
+      Handler: handler.handler
+      Runtime: python3.12
+  
+  UpdateInventoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/update_inventory/
+      Handler: handler.handler
+      Runtime: python3.12
+
+  SendWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/send_webhook/
+      Handler: handler.handler
+      Runtime: python3.12
+      Timeout: 10

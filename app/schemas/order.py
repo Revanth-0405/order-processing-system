@@ -30,3 +30,5 @@ class OrderOutputSchema(Schema):
 order_input_schema = OrderInputSchema()
 order_output_schema = OrderOutputSchema()
 orders_output_schema = OrderOutputSchema(many=True)
+order_schema = OrderOutputSchema()
+orders_schema = OrderOutputSchema(many=True)

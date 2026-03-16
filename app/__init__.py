@@ -6,14 +6,27 @@ from app.config import config_by_name
 from app.extensions import db, migrate, jwt
 from app.utils.error_handlers import register_error_handlers
 
+# Import the JSON formatter for structured logging
+from pythonjsonlogger import jsonlogger
+
 def create_app(config_name='dev'):
     app = Flask(__name__)
     
     # Load config
     app.config.from_object(config_by_name[config_name])
 
-    #configure logging
-    logging.basicConfig(level=logging.INFO)
+    # PHASE 4 FIX: Configure application-wide JSON Logging
+    logger = logging.getLogger()
+    # Clear any existing handlers
+    if logger.hasHandlers():
+        logger.handlers.clear()
+        
+    logHandler = logging.StreamHandler()
+    # Format the logs as JSON containing the timestamp, level, and message
+    formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+    logHandler.setFormatter(formatter)
+    logger.addHandler(logHandler)
+    logger.setLevel(logging.INFO)
 
     # Initialize extensions with the app
     db.init_app(app)
@@ -30,7 +43,7 @@ def create_app(config_name='dev'):
     from app.services.dynamodb_service import DynamoDBService
     DynamoDBService.create_webhook_deliveries_table()
 
-    #import models here
+    # import models here
     from app.models.user import User
     from app.models.product import Product
     from app.models.order import Order, OrderItem
