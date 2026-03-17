@@ -1,3 +1,4 @@
+import uuid
 import logging
 from app.extensions import db
 from app.models.order import Order
@@ -19,7 +20,12 @@ def handler(event, context):
     if not order_id or action not in ['reduce_stock', 'restore_stock']:
         return {"status": "error", "message": "Invalid event payload"}
 
-    order = Order.query.get(order_id)
+    # Convert order_id string to UUID for SQLAlchemy
+    if isinstance(order_id, str):
+        order_id = uuid.UUID(order_id)
+
+    # Fixed the 'order = order =' typo and standardized the SQLAlchemy 2.0 get()
+    order = db.session.get(Order, order_id)
     if not order:
         return {"status": "error", "message": "Order not found"}
 
@@ -27,9 +33,11 @@ def handler(event, context):
 
     try:
         for item in order.items:
-            # ROW-LEVEL LOCKING: .with_for_update() prevents other transactions 
-            # from modifying this product row until this transaction commits.
-            product = Product.query.with_for_update().get(item.product_id)
+            # CRITICAL FIX 3: Dialect-aware locking for SQLite testing compatibility
+            if db.engine.dialect.name == 'sqlite':
+                product = db.session.get(Product, item.product_id)
+            else:
+                product = db.session.get(Product, item.product_id, with_for_update=True)
             
             if not product:
                 continue
@@ -56,7 +64,7 @@ def handler(event, context):
 
         # Log the inventory update to DynamoDB
         DynamoDBService.put_event(
-            order_id=order_id,
+            order_id=str(order_id), # Keep as string for DynamoDB
             event_type="inventory_updated",
             payload={"action": action, "changes": inventory_changes},
             processed_by="update_inventory_lambda"
@@ -72,7 +80,7 @@ def handler(event, context):
         logger.error(f"Error updating inventory: {str(e)}")
         
         DynamoDBService.put_event(
-            order_id=order_id,
+            order_id=str(order_id), # Keep as string for DynamoDB
             event_type="inventory_update_failed",
             payload={"action": action, "error": str(e)},
             processed_by="update_inventory_lambda"

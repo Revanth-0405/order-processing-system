@@ -22,6 +22,9 @@ def handler(event, context):
     payload = event.get('payload', {})
 
     # PHASE 4 FIX: Use SQLAlchemy 2.0 Session.get
+    if isinstance(order_id, str):
+        order_id = uuid.UUID(order_id)
+        
     order = db.session.get(Order, order_id)
     if not order: return {"status": "error"}
 

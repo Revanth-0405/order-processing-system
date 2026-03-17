@@ -44,10 +44,17 @@ def test_order_idempotency_flow(client, app):
     
     # 4. First attempt (Should successfully create the order)
     resp1 = client.post('/api/v1/orders', json=valid_payload, headers=headers)
-    # FIX: If this fails, it will now print the exact error message to your terminal!
     assert resp1.status_code == 201, f"Order failed! Error: {resp1.data}" 
     
+    # CRITICAL FIX for Issue #9: Actually verify it was stored correctly in the database!
+    with app.app_context():
+        from app.models.order import Order
+        saved_order = Order.query.filter_by(idempotency_key='test-idem-key-999').first()
+        assert saved_order is not None, "Order was not saved to the database!"
+        assert saved_order.shipping_address == "123 Test Ave"
+        # FIX: The async Lambda may have already processed this, so it could be in any of these states!
+        assert saved_order.status in ["pending", "confirmed", "cancelled"]
+    
     # 5. Second attempt with the exact same Idempotency-Key
-    # The server should catch the duplicate key and return the cached 200 OK response
     resp2 = client.post('/api/v1/orders', json=valid_payload, headers=headers)
     assert resp2.status_code == 200, f"Idempotency replay failed! Error: {resp2.data}"

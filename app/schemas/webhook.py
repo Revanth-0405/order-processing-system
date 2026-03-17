@@ -9,7 +9,7 @@ VALID_EVENTS = [
 class WebhookSubscriptionSchema(Schema):
     id = fields.UUID(dump_only=True)
     target_url = fields.URL(required=True, error_messages={"invalid": "Must be a valid URL."})
-    event_type = fields.String(required=True, validate=validate.OneOf(VALID_EVENTS))
+    event_types = fields.List(fields.String(), required=True)
     secret_key = fields.String(dump_only=True) 
     is_active = fields.Boolean(load_default=True)
     created_at = fields.DateTime(dump_only=True)
