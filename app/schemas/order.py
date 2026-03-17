@@ -14,8 +14,7 @@ class OrderItemOutputSchema(Schema):
     product_id = fields.UUID()
     quantity = fields.Integer()
     unit_price = fields.Decimal(as_string=True)
-    subtotal = fields.Decimal(as_string=True)
-
+    
 class OrderOutputSchema(Schema):
     id = fields.UUID()
     order_number = fields.String()

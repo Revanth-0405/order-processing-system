@@ -7,7 +7,7 @@ class Order(db.Model):
     id = db.Column(db.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     order_number = db.Column(db.String(50), unique=True, nullable=False)
     user_id = db.Column(db.Uuid(as_uuid=True), db.ForeignKey('users.id'), nullable=False)
-    status = db.Column(db.String(20), default='pending')
+    status = db.Column(db.Enum('pending', 'confirmed', 'shipped', 'delivered', 'cancelled', name='order_status_enum'), default='pending', nullable=False)
     shipping_address = db.Column(db.Text, nullable=False)
     idempotency_key = db.Column(db.String(100), unique=True, nullable=True)
     notes = db.Column(db.Text, nullable=True)

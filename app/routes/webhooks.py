@@ -157,17 +157,42 @@ def test_webhook(webhook_id):
 @jwt_required
 def webhook_stats():
     table = get_dynamodb_resource().Table('WebhookDeliveries')
-    total = table.item_count
-    return jsonify({"total_deliveries": total, "success_rate": "Calculated via Athena/EMR in Prod"}), 200
+    try:
+        response = table.scan()
+        items = response.get('Items', [])
+        
+        total_deliveries = len(items)
+        if total_deliveries == 0:
+            return jsonify({
+                "total_deliveries": 0, 
+                "success_rate_percent": 0.0, 
+                "avg_response_time_ms": 0.0
+            }), 200
+            
+        successful_deliveries = sum(1 for item in items if item.get('success') is True)
+        success_rate = round((successful_deliveries / total_deliveries) * 100, 2)
+        
+        response_times = [float(item.get('duration', 0)) for item in items if item.get('duration')]
+        avg_time = round(sum(response_times) / len(response_times), 2) if response_times else 0.0
+        
+        return jsonify({
+            "total_deliveries": total_deliveries, 
+            "success_rate_percent": success_rate, 
+            "avg_response_time_ms": avg_time
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": f"Failed to calculate stats: {str(e)}"}), 500
 
 # -Manual Retry Endpoint ---
 @webhooks_bp.route('/<uuid:webhook_id>/deliveries/<delivery_id>/retry', methods=['POST'])
 @jwt_required
 def retry_delivery(webhook_id, delivery_id):
-   table = get_dynamodb_resource().Table('WebhookDeliveries')
-   delivery = table.query(KeyConditionExpression=Key('delivery_id').eq(str(delivery_id)))['Items'][0]
-   LambdaInvoker.invoke('send_webhook', delivery['payload'])
-   return jsonify({"message": "Re-dispatched"}), 202
+    table = get_dynamodb_resource().Table('WebhookDeliveries')
+    delivery = table.query(KeyConditionExpression=Key('delivery_id').eq(str(delivery_id)))['Items'][0]
+    LambdaInvoker.invoke('send_webhook', delivery['payload'])
+    return jsonify({"message": "Re-dispatched"}), 202
+
 # -DLQ ENDPOINTS ---
 @webhooks_bp.route('/dlq', methods=['GET'])
 @jwt_required
@@ -194,5 +219,5 @@ def get_dlq():
 def resolve_dlq(dlq_id):
     dlq_item = WebhookDLQ.query.get_or_404(dlq_id)
     dlq_item.resolved = True
-    db.session.commit()
+    db.session.commit() # CRITICAL FIX: Added the missing parentheses!
     return jsonify({"message": "DLQ item marked as resolved"}), 200

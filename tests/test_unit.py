@@ -72,7 +72,7 @@ def test_webhook_creation(app):
 def test_webhook_secret_generation(app):
     with app.app_context():
         # FIX: Updated to event_types array
-        w = WebhookSubscription(user_id=uuid.uuid4(), target_url="http://test.com", event_type="all", event_types=["all"])
+        w = WebhookSubscription(user_id=uuid.uuid4(), target_url="http://test.com", event_types=["all"])
         db.session.add(w)
         db.session.commit()
         assert w.secret_key is not None
