@@ -23,7 +23,10 @@ def create_app(config_name='dev'):
         
     logHandler = logging.StreamHandler()
     # Format the logs as JSON containing the timestamp, level, and message
-    formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+    formatter = jsonlogger.JsonFormatter(
+        '%(asctime)s %(levelname)s %(name)s %(service)s %(request_id)s %(message)s',
+        rename_fields={"asctime": "timestamp"}
+    )
     logHandler.setFormatter(formatter)
     logger.addHandler(logHandler)
     logger.setLevel(logging.INFO)

@@ -4,7 +4,7 @@ from flask_jwt_extended import get_jwt_identity, get_jwt
 from app.models.order import Order
 from app.services.order_service import OrderService
 from app.schemas.order import order_input_schema, order_output_schema, orders_output_schema
-from app.utils.decorators import jwt_required
+from app.utils.decorators import current_user_is_admin, jwt_required
 from app.services.dynamodb_service import DynamoDBService
 from app.utils.decorators import admin_required
 from app.services.lambda_invoker import LambdaInvoker
@@ -75,22 +75,20 @@ def get_order_events(order_id):
     events = DynamoDBService.get_events_by_order(order_id)
     return jsonify({'items': events, 'total': len(events)}), 200
 
-@orders_bp.route('/<uuid:order_id>/cancel', methods=['PUT'])
+@orders_bp.route('/<uuid:id>/cancel', methods=['PUT'])
 @jwt_required
-def cancel_order(order_id):
-    user_id = get_jwt_identity()
-    order = OrderService.get_order_by_id(order_id, user_id)
+def cancel_order(id):
+    order = db.session.get(Order, id)
+    if not order: return jsonify({"error": "Not found"}), 404
+    if order.user_id != get_jwt_identity() and not current_user_is_admin():
+        return jsonify({"error": "Unauthorized"}), 403
     
-    if not order:
-        return jsonify({'message': 'Order not found'}), 404
-        
+    # Delegate to the service so inventory restores and DynamoDB logs!
     try:
-        updated_order = OrderService.cancel_order(order)
-        return jsonify(order_output_schema.dump(updated_order)), 200
-    except ValueError as ve:
-        return jsonify({'message': str(ve)}), 400
-    except Exception as e:
-        return jsonify({'message': 'An error occurred while cancelling the order.'}), 500
+        OrderService.cancel_order(order)
+        return jsonify({"message": "Order cancelled"}), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     
 
 @orders_bp.route('/<uuid:order_id>/process', methods=['POST'])

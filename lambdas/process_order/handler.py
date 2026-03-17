@@ -1,3 +1,4 @@
+import uuid
 import random
 import logging
 from app.extensions import db
@@ -28,14 +29,18 @@ def handler(event, context):
 
     # 1. Log the initial 'order_created' event
     DynamoDBService.put_event(
-        order_id=order_id,
+        order_id=str(order_id), # Keep as string for DynamoDB
         event_type="order_created",
         payload=event,
         processed_by="process_order_lambda"
     )
 
-    # 2. Fetch the order from PostgreSQL
-    order = Order.query.get(order_id)
+    # CRITICAL FIX: Convert order_id string to UUID for SQLAlchemy 
+    if isinstance(order_id, str):
+        order_id = uuid.UUID(order_id)
+
+    # 2. Fetch the order from PostgreSQL (fixed typo)
+    order = db.session.get(Order, order_id)
     if not order:
         return {"status": "error", "message": "Order not found"}
 
@@ -45,7 +50,7 @@ def handler(event, context):
     if payment_successful:
         # Payment Success Flow
         DynamoDBService.put_event(
-            order_id=order_id,
+            order_id=str(order_id),
             event_type="payment_success",
             payload={"transaction_id": f"txn_{random.randint(1000, 9999)}"},
             processed_by="process_order_lambda"
@@ -55,7 +60,7 @@ def handler(event, context):
         db.session.commit()
         
         DynamoDBService.put_event(
-            order_id=order_id,
+            order_id=str(order_id),
             event_type="order_confirmed",
             payload={"status": "confirmed"},
             processed_by="process_order_lambda"
@@ -65,14 +70,14 @@ def handler(event, context):
         return {
             "status": "success",
             "event_type": "order_confirmed",
-            "order_id": order_id,
+            "order_id": str(order_id),
             "payload": {"order_number": order.order_number, "total_amount": str(order.total_amount)}
         }
         
     else:
         # Payment Failure Flow
         DynamoDBService.put_event(
-            order_id=order_id,
+            order_id=str(order_id),
             event_type="payment_failed",
             payload={"error": "Insufficient funds or card declined"},
             processed_by="process_order_lambda"
@@ -82,7 +87,7 @@ def handler(event, context):
         db.session.commit()
         
         DynamoDBService.put_event(
-            order_id=order_id,
+            order_id=str(order_id),
             event_type="order_cancelled",
             payload={"reason": "payment_failed"},
             processed_by="process_order_lambda"
@@ -91,6 +96,6 @@ def handler(event, context):
         return {
             "status": "failure",
             "event_type": "order_cancelled",
-            "order_id": order_id,
+            "order_id": str(order_id),
             "payload": {"reason": "payment_failed"}
         }
