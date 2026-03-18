@@ -4,10 +4,12 @@ from flask_jwt_extended import get_jwt_identity, get_jwt
 from app.models.order import Order
 from app.services.order_service import OrderService
 from app.schemas.order import order_input_schema, order_output_schema, orders_output_schema
-from app.utils.decorators import current_user_is_admin, jwt_required
+from app.utils.decorators import current_user_is_admin, jwt_required, admin_required
 from app.services.dynamodb_service import DynamoDBService
-from app.utils.decorators import admin_required
 from app.services.lambda_invoker import LambdaInvoker
+
+# CRITICAL FIX 1: Add the missing db import so the cancel route doesn't throw a NameError
+from app.extensions import db
 
 orders_bp = Blueprint('orders', __name__)
 
@@ -35,14 +37,15 @@ def create_order():
     
     # 3. Process the order
     try:
-        # CRITICAL FIX 4: Actually pass the key to the service!
         new_order = OrderService.create_order(user_id, data, idempotency_key=idem_key)
-        return jsonify({"message": "Order placed", "order_id": new_order.id}), 201
-    except Exception as e:
+        return jsonify({"message": "Order placed", "order_id": str(new_order.id)}), 201
+    except ValueError as e:
+        # Catch explicit validation errors (like insufficient stock)
         return jsonify({"error": str(e)}), 400
     except Exception as e:
+        # Catch unexpected server errors
         return jsonify({'message': 'An error occurred while placing the order.'}), 500
-    
+    # CRITICAL FIX 3: Removed the duplicate/unreachable except Exception block!
 
 @orders_bp.route('', methods=['GET'])
 @jwt_required
@@ -72,15 +75,18 @@ def get_order_events(order_id):
     if not order and not is_admin:
         return jsonify({'message': 'Order not found or access denied'}), 404
 
-    events = DynamoDBService.get_events_by_order(order_id)
+    events = DynamoDBService.get_events_by_order(str(order_id)) # Ensure string for DynamoDB
     return jsonify({'items': events, 'total': len(events)}), 200
 
 @orders_bp.route('/<uuid:id>/cancel', methods=['PUT'])
 @jwt_required
 def cancel_order(id):
     order = db.session.get(Order, id)
-    if not order: return jsonify({"error": "Not found"}), 404
-    if order.user_id != get_jwt_identity() and not current_user_is_admin():
+    if not order: 
+        return jsonify({"error": "Not found"}), 404
+        
+    # CRITICAL FIX 2: Typecast to strings so UUID objects match JWT string payloads perfectly
+    if str(order.user_id) != str(get_jwt_identity()) and not current_user_is_admin():
         return jsonify({"error": "Unauthorized"}), 403
     
     # Delegate to the service so inventory restores and DynamoDB logs!
@@ -94,7 +100,8 @@ def cancel_order(id):
 @orders_bp.route('/<uuid:order_id>/process', methods=['POST'])
 @admin_required
 def manually_process_order(order_id):
-    order = Order.query.get(order_id)
+    # Safely fetch using SQLAlchemy 2.0 pattern instead of deprecated .query.get()
+    order = db.session.get(Order, order_id)
     if not order:
         return jsonify({'message': 'Order not found'}), 404
 
